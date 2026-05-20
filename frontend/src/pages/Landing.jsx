@@ -18,7 +18,7 @@ const GAMES = [
     name: "Blood Strike",
     tag: "FPS · MOBILE",
     desc: "High-rank and exclusive skin accounts for the arena.",
-    img: "https://www.blood-strike.com/pc/gw/20240716155822/data/com_share.jpg",
+    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/3199170/capsule_616x353.jpg",
   },
   {
     id: "codm",
