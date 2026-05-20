@@ -26,8 +26,8 @@ export default function App() {
             <Route path="/listing/:id" element={<ListingDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/sell" element={<ProtectedRoute><CreateListing /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute noAdmin><Dashboard /></ProtectedRoute>} />
+            <Route path="/sell" element={<ProtectedRoute noAdmin><CreateListing /></ProtectedRoute>} />
             <Route path="/order/:id" element={<ProtectedRoute><OrderDetail /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" />} />

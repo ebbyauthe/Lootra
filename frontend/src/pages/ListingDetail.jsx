@@ -100,16 +100,20 @@ export default function ListingDetail() {
             <Lock className="w-4 h-4 text-[#CCFF00] shrink-0 mt-0.5" />
             <span>Funds held in escrow until you confirm successful account access.</span>
           </div>
-          {listing.status === "active" ? (
+          {user?.role === "admin" ? (
+            <div className="lootra-badge w-full text-center text-neutral-400">Admin accounts cannot purchase</div>
+          ) : listing.status === "active" ? (
             <button onClick={buy} disabled={busy || (user && user.id === listing.seller_id)} className="lootra-btn-primary w-full" data-testid="buy-now-btn">
               {busy ? "Processing…" : user?.id === listing.seller_id ? "Your own listing" : "Buy with escrow"}
             </button>
           ) : (
             <div className="lootra-badge w-full text-center" data-testid="listing-unavailable">UNAVAILABLE — {listing.status?.toUpperCase()}</div>
           )}
-          <button onClick={watch} className="lootra-btn-secondary w-full inline-flex items-center justify-center gap-2" data-testid="watchlist-btn">
-            <Heart className="w-4 h-4" /> Add to watchlist
-          </button>
+          {user?.role !== "admin" && (
+            <button onClick={watch} className="lootra-btn-secondary w-full inline-flex items-center justify-center gap-2" data-testid="watchlist-btn">
+              <Heart className="w-4 h-4" /> Add to watchlist
+            </button>
+          )}
         </div>
 
         <div className="lootra-card p-6 space-y-3">

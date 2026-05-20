@@ -27,8 +27,8 @@ export default function Layout({ children }) {
 
           <nav className="hidden md:flex items-center gap-1">
             <NavLink to="/browse" className={navItem} data-testid="nav-browse">Browse</NavLink>
-            <NavLink to="/sell" className={navItem} data-testid="nav-sell">Sell</NavLink>
-            {user && <NavLink to="/dashboard" className={navItem} data-testid="nav-dashboard">Dashboard</NavLink>}
+            {user?.role !== "admin" && <NavLink to="/sell" className={navItem} data-testid="nav-sell">Sell</NavLink>}
+            {user && user.role !== "admin" && <NavLink to="/dashboard" className={navItem} data-testid="nav-dashboard">Dashboard</NavLink>}
             {user?.role === "admin" && <NavLink to="/admin" className={navItem} data-testid="nav-admin">Admin</NavLink>}
           </nav>
 
@@ -60,8 +60,8 @@ export default function Layout({ children }) {
         {open && (
           <div className="md:hidden border-t border-[#2A2A2A] bg-[#0A0A0A] px-6 py-4 flex flex-col gap-3">
             <NavLink to="/browse" className={navItem} onClick={() => setOpen(false)}>Browse</NavLink>
-            <NavLink to="/sell" className={navItem} onClick={() => setOpen(false)}>Sell</NavLink>
-            {user && <NavLink to="/dashboard" className={navItem} onClick={() => setOpen(false)}>Dashboard</NavLink>}
+            {user?.role !== "admin" && <NavLink to="/sell" className={navItem} onClick={() => setOpen(false)}>Sell</NavLink>}
+            {user && user.role !== "admin" && <NavLink to="/dashboard" className={navItem} onClick={() => setOpen(false)}>Dashboard</NavLink>}
             {user?.role === "admin" && <NavLink to="/admin" className={navItem} onClick={() => setOpen(false)}>Admin</NavLink>}
             {!user && (
               <div className="flex gap-2 pt-2">

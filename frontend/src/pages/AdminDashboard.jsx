@@ -13,16 +13,19 @@ export default function AdminDashboard() {
   const [vault, setVault] = useState(null);
 
   const load = async () => {
-    try {
-      const [s, p, o, u, a] = await Promise.all([
-        api.get("/admin/stats"),
-        api.get("/admin/listings", { params: { status: "pending" } }),
-        api.get("/admin/orders"),
-        api.get("/admin/users"),
-        api.get("/admin/audit", { params: { limit: 100 } }),
-      ]);
-      setStats(s.data); setPending(p.data); setOrders(o.data); setUsers(u.data); setAudit(a.data);
-    } catch (e) { toast.error(formatError(e)); }
+    const safe = async (fn) => { try { return await fn(); } catch (e) { toast.error(formatError(e)); return null; } };
+    const [s, p, o, u, a] = await Promise.all([
+      safe(() => api.get("/admin/stats")),
+      safe(() => api.get("/admin/listings", { params: { status: "pending" } })),
+      safe(() => api.get("/admin/orders")),
+      safe(() => api.get("/admin/users")),
+      safe(() => api.get("/admin/audit", { params: { limit: 100 } })),
+    ]);
+    if (s) setStats(s.data);
+    if (p && Array.isArray(p.data)) setPending(p.data);
+    if (o && Array.isArray(o.data)) setOrders(o.data);
+    if (u && Array.isArray(u.data)) setUsers(u.data);
+    if (a && Array.isArray(a.data)) setAudit(a.data);
   };
   useEffect(() => { load(); }, []);
 
