@@ -40,7 +40,7 @@ export default function ListingCard({ listing, onClickOverride }) {
           </div>
         </div>
         <div className="flex items-center justify-between text-xs text-neutral-500 font-mono pt-2 border-t border-[#2A2A2A]">
-          <span>@{listing.seller_username}</span>
+          <Link to={`/user/${listing.seller_username}`} onClick={(e) => e.stopPropagation()} className="hover:text-white hover:underline">@{listing.seller_username}</Link>
           <span>{listing.region}</span>
         </div>
       </div>

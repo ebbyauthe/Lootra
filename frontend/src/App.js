@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import CreateListing from "./pages/CreateListing";
 import OrderDetail from "./pages/OrderDetail";
 import AdminDashboard from "./pages/AdminDashboard";
+import ProfilePage from "./pages/ProfilePage";
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/sell" element={<ProtectedRoute noAdmin><CreateListing /></ProtectedRoute>} />
             <Route path="/order/:id" element={<ProtectedRoute><OrderDetail /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+            <Route path="/user/:username" element={<ProfilePage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Layout>
