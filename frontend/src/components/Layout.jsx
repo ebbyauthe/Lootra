@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Shield, ShoppingBag, Plus, Wallet, LogOut, ShieldCheck, Menu, X } from "lucide-react";
+import { Shield, Wallet, LogOut, ShieldCheck, Menu, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const navItem = ({ isActive }) =>
@@ -39,7 +39,7 @@ export default function Layout({ children }) {
                   <Wallet className="w-4 h-4 text-[#CCFF00]" />
                   <span className="font-mono text-xs text-neutral-300">${user.balance?.toFixed(2)}</span>
                 </div>
-                <span className="text-sm text-neutral-400" data-testid="user-username">@{user.username}</span>
+                <Link to={`/user/${user.username}`} className="text-sm text-neutral-400 hover:text-white hover:underline" data-testid="user-username">@{user.username}</Link>
                 <button onClick={async () => { await logout(); nav("/"); }} className="lootra-btn-secondary !py-2 !px-3" data-testid="logout-btn">
                   <LogOut className="w-4 h-4" />
                 </button>
