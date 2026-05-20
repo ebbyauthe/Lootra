@@ -4,6 +4,37 @@ import { ShieldCheck, Lock, Eye, Zap, ArrowRight } from "lucide-react";
 import { api } from "../lib/api";
 import ListingCard from "../components/ListingCard";
 
+const GAMES = [
+  {
+    id: "efootball",
+    name: "eFootball",
+    tag: "FOOTBALL",
+    desc: "Elite squads, top-rated players and ranked accounts.",
+    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/1665460/capsule_616x353.jpg",
+  },
+  {
+    id: "bloodstrike",
+    name: "Blood Strike",
+    tag: "FPS · MOBILE",
+    desc: "High-rank and exclusive skin accounts for the arena.",
+    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/2084920/capsule_616x353.jpg",
+  },
+  {
+    id: "codm",
+    name: "Call of Duty: Mobile",
+    tag: "BATTLE ROYALE",
+    desc: "Max-level accounts with rare operators and blueprints.",
+    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/1938090/capsule_616x353.jpg",
+  },
+  {
+    id: "pubg",
+    name: "PUBG Mobile",
+    tag: "BATTLE ROYALE",
+    desc: "Conqueror-tier accounts, rare outfits and weapon skins.",
+    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/578080/capsule_616x353.jpg",
+  },
+];
+
 const FEATURES = [
   { icon: Lock, title: "Encrypted Vault", desc: "Credentials sealed with AES-128 Fernet. Revealed only after escrow clears." },
   { icon: ShieldCheck, title: "Escrow First", desc: "Every transaction held until the buyer confirms account access." },
@@ -70,6 +101,50 @@ export default function Landing() {
             <p className="text-sm text-neutral-400 leading-relaxed">{f.desc}</p>
           </div>
         ))}
+      </section>
+
+      {/* Popular Games */}
+      <section className="space-y-6">
+        <div>
+          <div className="lootra-badge inline-block mb-3">TRADE BY GAME</div>
+          <h2 className="text-2xl md:text-3xl font-medium tracking-tight">Popular games on Lootra</h2>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {GAMES.map((game) => (
+            <Link
+              key={game.id}
+              to={`/browse?game=${game.id}`}
+              className="lootra-card group overflow-hidden block"
+            >
+              <div className="relative overflow-hidden">
+                <img
+                  src={game.img}
+                  alt={game.name}
+                  className="w-full aspect-[16/9] object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
+                  onError={(e) => {
+                    e.target.style.display = "none";
+                    e.target.nextSibling.style.display = "flex";
+                  }}
+                />
+                <div
+                  className="w-full aspect-[16/9] bg-[#1A1A1A] items-center justify-center hidden"
+                  style={{ display: "none" }}
+                >
+                  <span className="font-mono text-xs text-neutral-600">{game.name}</span>
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent" />
+              </div>
+              <div className="p-4 space-y-1">
+                <div className="lootra-badge lootra-badge-accent inline-block">{game.tag}</div>
+                <div className="font-medium mt-2">{game.name}</div>
+                <p className="text-xs text-neutral-400 leading-relaxed">{game.desc}</p>
+                <div className="text-xs text-[#CCFF00] font-mono pt-1 group-hover:underline">
+                  Browse listings →
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
       </section>
 
       {/* Featured listings */}
