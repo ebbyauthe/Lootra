@@ -20,22 +20,37 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 # ---------------- Config ----------------
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ["JWT_SECRET"]
-VAULT_KEY = os.environ["VAULT_KEY"].encode()
+_startup_error: str = ""
+JWT_ALG = "HS256"
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@lootra.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin@12345")
 SIGNUP_BONUS = float(os.environ.get("SIGNUP_BONUS", "500"))
-JWT_ALG = "HS256"
 
-fernet = Fernet(VAULT_KEY)
-
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+try:
+    import traceback as _tb
+    MONGO_URL = os.environ["MONGO_URL"]
+    DB_NAME = os.environ["DB_NAME"]
+    JWT_SECRET = os.environ["JWT_SECRET"]
+    VAULT_KEY = os.environ["VAULT_KEY"].encode()
+    fernet = Fernet(VAULT_KEY)
+    client = AsyncIOMotorClient(MONGO_URL)
+    db = client[DB_NAME]
+except Exception as _e:
+    _startup_error = f"{type(_e).__name__}: {_e}\n{_tb.format_exc()}"
+    MONGO_URL = DB_NAME = JWT_SECRET = ""
+    VAULT_KEY = b""
+    fernet = client = db = None  # type: ignore
 
 app = FastAPI(title="Lootra API")
 api = APIRouter(prefix="/api")
+
+from fastapi.responses import JSONResponse as _JSONResponse
+
+@app.middleware("http")
+async def _startup_gate(request: Request, call_next):
+    if _startup_error:
+        return _JSONResponse({"error": "misconfigured", "detail": _startup_error}, status_code=503)
+    return await call_next(request)
 
 # ---------------- Logging ----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
