@@ -181,6 +181,13 @@ class ReviewIn(BaseModel):
 class DisputeIn(BaseModel):
     reason: str = Field(min_length=10, max_length=1000)
 
+class MessageIn(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+class RateIn(BaseModel):
+    score: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=500)
+
 # ---------------- Startup ----------------
 @app.on_event("startup")
 async def startup():
@@ -190,6 +197,9 @@ async def startup():
     await db.listings.create_index([("status", 1), ("created_at", -1)])
     await db.orders.create_index("id", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.messages.create_index([("order_id", 1), ("created_at", 1)])
+    await db.ratings.create_index([("rated_id", 1), ("created_at", -1)])
+    await db.ratings.create_index([("order_id", 1), ("rater_id", 1)], unique=True)
     # Seed admin
     existing = await db.users.find_one({"email": ADMIN_EMAIL})
     if not existing:
@@ -226,7 +236,17 @@ async def startup():
             {"id": "genshin", "name": "Genshin Impact", "platform": "Mobile"},
             {"id": "pubg", "name": "PUBG", "platform": "PC"},
             {"id": "rocketleague", "name": "Rocket League", "platform": "PC"},
+            {"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"},
         ])
+    # Migrations: insert new games if not present
+    for g in [
+        {"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"},
+        {"id": "efootball",   "name": "eFootball",    "platform": "Mobile"},
+        {"id": "pubgmobile",  "name": "PUBG Mobile",  "platform": "Mobile"},
+        {"id": "codm",        "name": "Call of Duty: Mobile", "platform": "Mobile"},
+    ]:
+        if not await db.games.find_one({"id": g["id"]}):
+            await db.games.insert_one(g)
 
 # ---------------- Auth ----------------
 @api.post("/auth/register")
@@ -571,6 +591,92 @@ async def review_order(order_id: str, body: ReviewIn, user: dict = Depends(get_c
 @api.get("/sellers/{seller_id}/reviews")
 async def seller_reviews(seller_id: str):
     return await db.reviews.find({"seller_id": seller_id}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
+
+# ---------------- P2P Chat ----------------
+@api.get("/orders/{order_id}/messages")
+async def get_messages(order_id: str, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if user["id"] not in (o["buyer_id"], o["seller_id"]) and user.get("role") != "admin":
+        raise HTTPException(403, "Forbidden")
+    return await db.messages.find({"order_id": order_id}, {"_id": 0}).sort([("created_at", 1)]).to_list(500)
+
+@api.post("/orders/{order_id}/messages")
+async def send_message(order_id: str, body: MessageIn, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if user["id"] not in (o["buyer_id"], o["seller_id"]) and user.get("role") != "admin":
+        raise HTTPException(403, "Forbidden")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "order_id": order_id,
+        "sender_id": user["id"],
+        "sender_username": user["username"],
+        "is_admin": user.get("role") == "admin",
+        "content": body.content,
+        "created_at": now_utc().isoformat(),
+    }
+    await db.messages.insert_one(msg)
+    msg.pop("_id", None)
+    return msg
+
+# ---------------- Mutual Rating ----------------
+@api.post("/orders/{order_id}/rate")
+async def rate_trade(order_id: str, body: RateIn, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o["status"] not in ("RELEASED", "REFUNDED"):
+        raise HTTPException(400, "Trade must be complete to leave a rating")
+    if user["id"] not in (o["buyer_id"], o["seller_id"]):
+        raise HTTPException(403, "Not part of this order")
+    if await db.ratings.find_one({"order_id": order_id, "rater_id": user["id"]}):
+        raise HTTPException(400, "Already rated this trade")
+    rated_id = o["seller_id"] if user["id"] == o["buyer_id"] else o["buyer_id"]
+    rated_username = o["seller_username"] if user["id"] == o["buyer_id"] else o["buyer_username"]
+    doc = {
+        "id": str(uuid.uuid4()),
+        "order_id": order_id,
+        "rater_id": user["id"],
+        "rater_username": user["username"],
+        "rated_id": rated_id,
+        "rated_username": rated_username,
+        "score": body.score,
+        "comment": body.comment,
+        "created_at": now_utc().isoformat(),
+    }
+    await db.ratings.insert_one(doc)
+    doc.pop("_id", None)
+    all_r = await db.ratings.find({"rated_id": rated_id}).to_list(10000)
+    avg = sum(r["score"] for r in all_r) / len(all_r)
+    await db.users.update_one({"id": rated_id}, {"$set": {"rating": round(avg, 2), "rating_count": len(all_r)}})
+    return doc
+
+# ---------------- Public Profiles ----------------
+@api.get("/users/{username}")
+async def get_profile(username: str):
+    u = await db.users.find_one({"username": username}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(404, "User not found")
+    listings = await db.listings.find(
+        {"seller_id": u["id"], "status": "active"},
+        {"_id": 0, "credentials_encrypted": 0}
+    ).sort([("created_at", -1)]).to_list(20)
+    ratings = await db.ratings.find({"rated_id": u["id"]}, {"_id": 0}).sort([("created_at", -1)]).to_list(50)
+    return {
+        "id": u["id"],
+        "username": u["username"],
+        "role": u.get("role", "user"),
+        "trust_score": u.get("trust_score", 0),
+        "sales_count": u.get("sales_count", 0),
+        "rating": u.get("rating", 0.0),
+        "rating_count": u.get("rating_count", 0),
+        "created_at": u.get("created_at"),
+        "listings": listings,
+        "ratings": ratings,
+    }
 
 # ---------------- Wallet ----------------
 @api.post("/wallet/topup")
