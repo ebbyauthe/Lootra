@@ -59,6 +59,14 @@ export default function Layout({ children }) {
 
         {open && (
           <div className="md:hidden border-t border-[#2A2A2A] bg-[#0A0A0A] px-6 py-4 flex flex-col gap-3">
+            {user && (
+              <div className="flex items-center justify-between py-2 border-b border-[#2A2A2A] mb-1">
+                <Link to={`/user/${user.username}`} onClick={() => setOpen(false)} className="text-sm font-medium text-[#CCFF00] hover:underline">@{user.username}</Link>
+                <div className="flex items-center gap-1 font-mono text-xs text-neutral-300">
+                  <Wallet className="w-3.5 h-3.5 text-[#CCFF00]" />${user.balance?.toFixed(2)}
+                </div>
+              </div>
+            )}
             <NavLink to="/browse" className={navItem} onClick={() => setOpen(false)}>Browse</NavLink>
             {user?.role !== "admin" && <NavLink to="/sell" className={navItem} onClick={() => setOpen(false)}>Sell</NavLink>}
             {user && user.role !== "admin" && <NavLink to="/dashboard" className={navItem} onClick={() => setOpen(false)}>Dashboard</NavLink>}
@@ -70,7 +78,7 @@ export default function Layout({ children }) {
               </div>
             )}
             {user && (
-              <button onClick={async () => { await logout(); setOpen(false); nav("/"); }} className="lootra-btn-secondary">Logout</button>
+              <button onClick={async () => { await logout(); setOpen(false); nav("/"); }} className="lootra-btn-secondary mt-1">Logout</button>
             )}
           </div>
         )}
