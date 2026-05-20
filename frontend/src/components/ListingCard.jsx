@@ -9,10 +9,10 @@ const PLACEHOLDERS = [
   "https://images.unsplash.com/photo-1766601269332-6f012c9e80f9?crop=entropy&cs=srgb&fm=jpg&q=85&w=800",
 ];
 
-export default function ListingCard({ listing }) {
+export default function ListingCard({ listing, onClickOverride }) {
   const img = listing.screenshots?.[0] || PLACEHOLDERS[(listing.title?.length || 0) % PLACEHOLDERS.length];
   return (
-    <Link to={`/listing/${listing.id}`} className="lootra-card group block" data-testid={`listing-card-${listing.id}`}>
+    <Link to={`/listing/${listing.id}`} onClick={onClickOverride ? (e) => { e.preventDefault(); onClickOverride(); } : undefined} className="lootra-card group block" data-testid={`listing-card-${listing.id}`}>
       <div className="relative aspect-[16/10] overflow-hidden">
         <img src={img} alt={listing.title} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
