@@ -1,0 +1,134 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Dark Premium Tech",
+  "design_philosophy": "Minimalist, professional SaaS-like dashboard mixed with premium gaming-adjacent aesthetics. Strictly dark-mode. Relies on solid deep blacks, 1px high-contrast borders, and a single striking 'Electric Lime' accent. Avoids all 'AI-slop' aesthetics (no purple/teal gradients, no heavy glassmorphism, no over-gamy neon overload). Trust is built through structural clarity, precise typography, and negative space.",
+  "colors": {
+    "background": {
+      "base": "#0A0A0A",
+      "surface": "#121212",
+      "surface_elevated": "#1A1A1A",
+      "surface_hover": "#222222"
+    },
+    "border": {
+      "default": "#2A2A2A",
+      "focus": "#555555",
+      "accent": "#CCFF00"
+    },
+    "text": {
+      "primary": "#F3F4F6",
+      "secondary": "#9CA3AF",
+      "muted": "#6B7280",
+      "inverse": "#000000"
+    },
+    "accent": {
+      "primary": "#CCFF00",
+      "primary_hover": "#E6FF00",
+      "primary_muted": "rgba(204, 255, 0, 0.1)"
+    },
+    "status": {
+      "success": "#CCFF00",
+      "warning": "#FFB020",
+      "error": "#FF453A",
+      "info": "#3B82F6"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Cabinet Grotesk, sans-serif",
+      "body": "Satoshi, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-medium",
+      "h2": "text-2xl md:text-3xl tracking-tight font-medium",
+      "h3": "text-xl md:text-2xl tracking-tight font-medium",
+      "h4": "text-base md:text-lg tracking-tight font-medium",
+      "body": "text-base md:text-sm leading-relaxed",
+      "small": "text-xs md:text-sm",
+      "overline": "text-[10px] md:text-xs tracking-[0.2em] uppercase font-mono text-muted"
+    },
+    "instructions": "Never use Inter, Roboto, or Arial. Use Cabinet Grotesk for emotional weight and headings. Use JetBrains Mono for prices, player ranks, escrow status steps, and digital vault hashes to sell the 'technical/secure' feel."
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Philosophy. Containers with borders must have internal padding (p-6 or p-8) to prevent text collision. Use optical alignment.",
+    "grids": {
+      "dashboard": "Control Room Grid: grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with gap-4 or gap-6. Every pixel utilized, h-full on children.",
+      "listings": "Bento Grid or strict masonry for varying screenshot sizes, usually grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 with gap-6."
+    },
+    "surfaces": "Grid Borders: Expose the skeleton. Data-heavy sections should use border-collapse style layouts where possible, with 1px subtle borders (border-border). Avoid soft UI/shadows."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#CCFF00] text-black font-medium hover:bg-[#E6FF00] rounded-none px-6 py-3 transition-colors",
+      "secondary": "bg-transparent border border-[#2A2A2A] text-[#F3F4F6] hover:bg-[#1A1A1A] rounded-none px-6 py-3 transition-colors",
+      "ghost": "bg-transparent text-[#9CA3AF] hover:text-[#F3F4F6] hover:bg-[#1A1A1A] rounded-none transition-colors"
+    },
+    "cards": {
+      "listing_card": "bg-[#121212] border border-[#2A2A2A] rounded-none hover:border-[#555555] transition-colors overflow-hidden group. Do not use drop shadows. Use internal p-0 for images, p-4 for content.",
+      "stat_card": "bg-[#121212] border border-[#2A2A2A] rounded-none p-6 flex flex-col justify-between"
+    },
+    "inputs": {
+      "default": "bg-[#0A0A0A] border border-[#2A2A2A] text-[#F3F4F6] focus:border-[#CCFF00] focus:ring-1 focus:ring-[#CCFF00] rounded-none outline-none transition-all"
+    },
+    "badges": {
+      "verified": "bg-[rgba(204,255,0,0.1)] text-[#CCFF00] border border-[rgba(204,255,0,0.2)] font-mono text-xs px-2 py-1 rounded-none",
+      "neutral": "bg-[#1A1A1A] text-[#9CA3AF] border border-[#2A2A2A] font-mono text-xs px-2 py-1 rounded-none"
+    },
+    "stepper": {
+      "escrow_status": "Linear progression using mono-spaced font for step numbers. Active step highlighted in #CCFF00, past steps in text-primary, future steps in text-muted. Use thin connecting lines border-[#2A2A2A]."
+    }
+  },
+  "visual_enhancers": {
+    "texture": "Subtle SVG noise or grain overlay fixed across the entire viewport (opacity-5 mix-blend-overlay) to break the digital flatness of #0A0A0A.",
+    "hover_effects": "Slight lift (-translate-y-1) for listing cards. Accent borders lighting up on hover. No glowing box-shadows.",
+    "icons": "Use Phosphor Icons (@phosphor-icons/react) or Lucide (lucide-react). Use sharp, clean strokes."
+  },
+  "media": {
+    "hero_backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1708778002477-75611274f23d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRhcmslMjBnZW9tZXRyeXxlbnwwfHx8fDE3NzkyNDI4MjV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Black background with geometric squares. Use as a very subtle, low-opacity background for the Hero section.",
+        "category": "hero"
+      },
+      {
+        "url": "https://images.pexels.com/photos/12627677/pexels-photo-12627677.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Vivid dark abstract geometry. Good for Vault/Security messaging sections.",
+        "category": "background"
+      }
+    ],
+    "game_tiles_and_placeholders": [
+      {
+        "url": "https://images.unsplash.com/photo-1775801535042-52672e4d93ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZGFyayUyMGdhbWluZyUyMHNldHVwfGVufDB8fHx8MTc3OTI0MjgyMHww&ixlib=rb-4.1.0&q=85",
+        "description": "Minimalist digital clock/keyboard. Good for PC category or listing placeholder.",
+        "category": "placeholder"
+      },
+      {
+        "url": "https://images.pexels.com/photos/30469967/pexels-photo-30469967.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Sleek PC gaming station. Perfect for high-end account listing placeholder.",
+        "category": "placeholder"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1543328011-1c0d628fae09?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwyfHxkYXJrJTIwbmVvbiUyMGVzcG9ydHMlMjBjb250cm9sbGVyfGVufDB8fHx8MTc3OTI0MjgyOXww&ixlib=rb-4.1.0&q=85",
+        "description": "Black controller. Good for Console accounts category.",
+        "category": "category_tile"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1766601269332-6f012c9e80f9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHw0fHxkYXJrJTIwbmVvbiUyMGVzcG9ydHMlMjBjb250cm9sbGVyfGVufDB8fHx8MTc3OTI0MjgyOXww&ixlib=rb-4.1.0&q=85",
+        "description": "Black gaming mouse with ambient light. Good for FPS/Competitive category.",
+        "category": "category_tile"
+      }
+    ]
+  },
+  "testing": {
+    "attributes": "All interactive and key informational elements MUST include a `data-testid` attribute (kebab-case, role-based). Example: `data-testid=\"buy-now-button\"`, `data-testid=\"escrow-status-text\"`."
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Dark Premium Tech archetype. Do not implement a light mode toggle.",
+    "Do not use generic border-radius. Use rounded-none for a sharper, more technical SaaS feel. If rounding is absolutely needed, max 2px or 4px (rounded-sm).",
+    "Use Framer Motion for the Escrow Status updates and Vault Reveal interactions (e.g., decrypting animation).",
+    "Use standard Shadcn UI components for complex interactions (Dialogs, Select, Dropdowns) but strip the default Vercel look by applying the custom black/lime colors and sharp borders.",
+    "The admin dashboard should utilize dense table layouts (border-collapse) and mono-spaced fonts for transaction hashes, IDs, and amounts.",
+    "Ensure the CSS variables reflect this precise palette in /app/frontend/src/index.css.",
+    "Implement a CSS noise overlay class to give the dark background texture."
+  ]
+}
