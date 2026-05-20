@@ -31,7 +31,7 @@ export default function CreateListing() {
   });
   const [newShot, setNewShot] = useState("");
 
-  useEffect(() => { api.get("/catalog/games").then(({ data }) => setGames(data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/catalog/games").then(({ data }) => { if (Array.isArray(data)) setGames(data); }).catch(() => {}); }, []);
 
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -112,10 +112,23 @@ export default function CreateListing() {
 
         {step === 1 && (
           <div className="space-y-4" data-testid="step-details">
-            <Field label="Title"><input className="lootra-input" value={form.title} onChange={(e) => upd("title", e.target.value)} data-testid="field-title" /></Field>
-            <Field label="Description"><textarea className="lootra-input min-h-[120px]" value={form.description} onChange={(e) => upd("description", e.target.value)} data-testid="field-description" /></Field>
+            <div>
+              <Field label="Title">
+                <input className="lootra-input" value={form.title} onChange={(e) => upd("title", e.target.value)} data-testid="field-title" />
+              </Field>
+              {form.title.length > 0 && form.title.length < 5 && <p className="text-xs text-red-400 mt-1">Title must be at least 5 characters ({form.title.length}/5)</p>}
+            </div>
+            <div>
+              <Field label="Description">
+                <textarea className="lootra-input min-h-[120px]" value={form.description} onChange={(e) => upd("description", e.target.value)} data-testid="field-description" />
+              </Field>
+              {form.description.length > 0 && form.description.length < 10 && <p className="text-xs text-red-400 mt-1">Description must be at least 10 characters ({form.description.length}/10)</p>}
+            </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Price (USD)"><input type="number" min="0" step="0.01" className="lootra-input" value={form.price} onChange={(e) => upd("price", e.target.value)} data-testid="field-price" /></Field>
+              <div>
+                <Field label="Price (USD)"><input type="number" min="0" step="0.01" className="lootra-input" value={form.price} onChange={(e) => upd("price", e.target.value)} data-testid="field-price" /></Field>
+                {form.price !== "" && !(parseFloat(form.price) > 0) && <p className="text-xs text-red-400 mt-1">Enter a price greater than 0</p>}
+              </div>
               <Field label="Game">
                 <select className="lootra-input" value={form.game} onChange={(e) => upd("game", e.target.value)} data-testid="field-game">
                   {games.map((g) => <option key={g.id}>{g.name}</option>)}
