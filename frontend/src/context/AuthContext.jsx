@@ -9,8 +9,9 @@ export function AuthProvider({ children }) {
 
   const refresh = useCallback(async () => {
     try {
-      const { data } = await api.get("/auth/me");
-      setUser(data);
+      // Silent probe — 401 is expected for guests.
+      const { data } = await api.get("/auth/me", { validateStatus: (s) => s === 200 || s === 401 });
+      if (data && data.id) setUser(data); else setUser(false);
     } catch {
       setUser(false);
     } finally {
