@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "../lib/api";
 import ListingCard from "../components/ListingCard";
 
@@ -26,6 +26,7 @@ export default function Browse() {
   useEffect(() => { fetchListings(); /* eslint-disable-next-line */ }, []);
 
   const upd = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -34,13 +35,18 @@ export default function Browse() {
           <div className="lootra-badge inline-block mb-3">MARKETPLACE</div>
           <h1 className="text-3xl md:text-4xl font-medium tracking-tight">Browse accounts</h1>
         </div>
-        <div className="font-mono text-xs text-neutral-500" data-testid="results-count">{listings.length} RESULTS</div>
+        <div className="flex items-center gap-3">
+          <div className="font-mono text-xs text-neutral-500" data-testid="results-count">{listings.length} RESULTS</div>
+          <button onClick={() => setFiltersOpen((o) => !o)} className="lg:hidden lootra-btn-secondary !py-2 !px-3 inline-flex items-center gap-2 text-xs">
+            <SlidersHorizontal className="w-3 h-3" /> Filters {filtersOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-[260px_1fr] gap-6">
         {/* Filter sidebar */}
-        <aside className="lootra-card p-5 h-fit space-y-5 sticky top-24" data-testid="filter-sidebar">
-          <div className="flex items-center gap-2 text-xs tracking-[0.2em] uppercase font-mono text-neutral-400">
+        <aside className={`lootra-card p-5 h-fit space-y-5 lg:sticky lg:top-24 ${filtersOpen ? "block" : "hidden"} lg:block`} data-testid="filter-sidebar">
+          <div className="hidden lg:flex items-center gap-2 text-xs tracking-[0.2em] uppercase font-mono text-neutral-400">
             <SlidersHorizontal className="w-3 h-3" /> Filters
           </div>
 
@@ -107,7 +113,7 @@ export default function Browse() {
             </select>
           </div>
 
-          <button onClick={fetchListings} className="lootra-btn-primary w-full" data-testid="apply-filters-btn">Apply filters</button>
+          <button onClick={() => { fetchListings(); setFiltersOpen(false); }} className="lootra-btn-primary w-full" data-testid="apply-filters-btn">Apply filters</button>
         </aside>
 
         {/* Results */}
