@@ -61,46 +61,33 @@ export default function Landing() {
             Lootra holds funds in escrow, encrypts every credential, and verifies every listing
             — so traders can move accounts like they move pixels.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <Link to="/browse" className="lootra-btn-primary inline-flex items-center gap-2" data-testid="hero-browse-btn">
-              Browse marketplace <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link to="/sell" className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="hero-sell-btn">
-              List an account
-            </Link>
-          </div>
-          <div className="flex items-center gap-6 pt-4 text-xs font-mono text-neutral-500">
+          <div className="flex items-center gap-6 pt-2 text-xs font-mono text-neutral-500">
             <div><span className="text-[#CCFF00]">0%</span> chargeback fraud</div>
             <div><span className="text-[#CCFF00]">100%</span> escrow protected</div>
             <div><span className="text-[#CCFF00]">24h</span> avg dispute resolution</div>
           </div>
         </div>
         <div className="md:col-span-5">
-          <div className="lootra-card overflow-hidden">
-            <img
-              src="https://images.unsplash.com/photo-1775801535042-52672e4d93ca?crop=entropy&cs=srgb&fm=jpg&q=85&w=900"
-              alt="dark gaming setup"
-              className="w-full aspect-[4/5] object-cover opacity-80"
-            />
-            <div className="p-4 border-t border-[#2A2A2A]">
-              <div className="text-[10px] tracking-[0.2em] uppercase font-mono text-neutral-500">Live escrow</div>
-              <div className="font-mono text-xs text-neutral-300 mt-1">
+          <div className="lootra-card p-8 space-y-4">
+            <div className="text-[10px] tracking-[0.2em] uppercase font-mono text-neutral-500">Start trading</div>
+            <p className="text-sm text-neutral-400 leading-relaxed">
+              Browse thousands of verified accounts or list your own — protected by escrow every step of the way.
+            </p>
+            <div className="space-y-3 pt-2">
+              <Link to="/browse" className="lootra-btn-primary inline-flex items-center gap-2 w-full justify-center" data-testid="hero-browse-btn">
+                Browse marketplace <ArrowRight className="w-4 h-4" />
+              </Link>
+              <Link to="/sell" className="lootra-btn-secondary inline-flex items-center gap-2 w-full justify-center" data-testid="hero-sell-btn">
+                List an account
+              </Link>
+            </div>
+            <div className="border-t border-[#2A2A2A] pt-4">
+              <div className="font-mono text-xs text-neutral-300">
                 <span className="text-[#CCFF00]">●</span> $24,381 currently held across 142 active orders
               </div>
             </div>
           </div>
         </div>
-      </section>
-
-      {/* Features */}
-      <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="features-section">
-        {FEATURES.map((f) => (
-          <div key={f.title} className="lootra-card p-6">
-            <f.icon className="w-5 h-5 text-[#CCFF00] mb-4" />
-            <h3 className="font-medium mb-2">{f.title}</h3>
-            <p className="text-sm text-neutral-400 leading-relaxed">{f.desc}</p>
-          </div>
-        ))}
       </section>
 
       {/* Popular Games */}
@@ -145,6 +132,17 @@ export default function Landing() {
             </Link>
           ))}
         </div>
+      </section>
+
+      {/* Features */}
+      <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="features-section">
+        {FEATURES.map((f) => (
+          <div key={f.title} className="lootra-card p-6">
+            <f.icon className="w-5 h-5 text-[#CCFF00] mb-4" />
+            <h3 className="font-medium mb-2">{f.title}</h3>
+            <p className="text-sm text-neutral-400 leading-relaxed">{f.desc}</p>
+          </div>
+        ))}
       </section>
 
       {/* Featured listings */}
