@@ -99,33 +99,26 @@ function OrdersTable({ orders, type }) {
   if (orders.length === 0)
     return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No {type === "buyer" ? "purchases" : "sales"} yet.</div>;
   return (
-    <div className="lootra-card overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-[#1A1A1A] text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">
-          <tr>
-            <th className="text-left px-4 py-3">Order</th>
-            <th className="text-left px-4 py-3">Listing</th>
-            <th className="text-left px-4 py-3">{type === "buyer" ? "Seller" : "Buyer"}</th>
-            <th className="text-right px-4 py-3">Amount</th>
-            <th className="text-left px-4 py-3">Status</th>
-            <th className="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((o) => (
-            <tr key={o.id} className="border-t border-[#2A2A2A]" data-testid={`order-row-${o.id}`}>
-              <td className="px-4 py-3 font-mono text-xs text-neutral-400">#{o.id.slice(0,8)}</td>
-              <td className="px-4 py-3 truncate max-w-[200px]">{o.listing_snapshot?.title}</td>
-              <td className="px-4 py-3 text-neutral-400">@{type === "buyer" ? o.seller_username : o.buyer_username}</td>
-              <td className="px-4 py-3 text-right font-mono text-[#CCFF00]">${o.amount.toFixed(2)}</td>
-              <td className={`px-4 py-3 font-mono text-xs ${STATUS_COLORS[o.status] || ""}`}>{o.status}</td>
-              <td className="px-4 py-3 text-right">
-                <Link to={`/order/${o.id}`} className="text-[#CCFF00] text-xs hover:underline" data-testid={`view-order-${o.id}`}>View →</Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {orders.map((o) => (
+        <div key={o.id} className="lootra-card p-4 flex flex-col gap-3" data-testid={`order-row-${o.id}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-medium text-sm truncate">{o.listing_snapshot?.title}</div>
+              <div className="text-[10px] font-mono text-neutral-500 mt-0.5">
+                #{o.id.slice(0,8)} · @{type === "buyer" ? o.seller_username : o.buyer_username}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="font-mono text-[#CCFF00] text-sm">${o.amount.toFixed(2)}</div>
+              <div className={`font-mono text-[10px] mt-0.5 ${STATUS_COLORS[o.status] || ""}`}>{o.status}</div>
+            </div>
+          </div>
+          <Link to={`/order/${o.id}`} className="lootra-btn-secondary !py-2 text-center text-xs w-full" data-testid={`view-order-${o.id}`}>
+            View order →
+          </Link>
+        </div>
+      ))}
     </div>
   );
 }
@@ -139,33 +132,26 @@ function ListingsTable({ listings, reload }) {
   if (listings.length === 0)
     return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No listings yet. <Link to="/sell" className="text-[#CCFF00] underline">Create one</Link>.</div>;
   return (
-    <div className="lootra-card overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-[#1A1A1A] text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">
-          <tr>
-            <th className="text-left px-4 py-3">Listing</th>
-            <th className="text-left px-4 py-3">Game</th>
-            <th className="text-right px-4 py-3">Price</th>
-            <th className="text-left px-4 py-3">Status</th>
-            <th className="text-right px-4 py-3">Views</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {listings.map((l) => (
-            <tr key={l.id} className="border-t border-[#2A2A2A]" data-testid={`mylisting-row-${l.id}`}>
-              <td className="px-4 py-3 truncate max-w-[260px]"><Link to={`/listing/${l.id}`} className="hover:text-[#CCFF00]">{l.title}</Link></td>
-              <td className="px-4 py-3 text-neutral-400">{l.game}</td>
-              <td className="px-4 py-3 text-right font-mono text-[#CCFF00]">${l.price.toFixed(2)}</td>
-              <td className="px-4 py-3 font-mono text-xs text-neutral-300">{l.status.toUpperCase()}</td>
-              <td className="px-4 py-3 text-right font-mono text-neutral-400">{l.views}</td>
-              <td className="px-4 py-3 text-right">
-                {l.status !== "sold" && <button onClick={() => remove(l.id)} className="text-[#FF453A] text-xs hover:underline" data-testid={`delete-listing-${l.id}`}>Delete</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {listings.map((l) => (
+        <div key={l.id} className="lootra-card p-4 flex flex-col gap-3" data-testid={`mylisting-row-${l.id}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <Link to={`/listing/${l.id}`} className="font-medium text-sm truncate block hover:text-[#CCFF00]">{l.title}</Link>
+              <div className="text-[10px] font-mono text-neutral-500 mt-0.5">{l.game} · {l.views} views</div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="font-mono text-[#CCFF00] text-sm">${l.price.toFixed(2)}</div>
+              <div className="font-mono text-[10px] text-neutral-400 mt-0.5">{l.status.toUpperCase()}</div>
+            </div>
+          </div>
+          {l.status !== "sold" && (
+            <button onClick={() => remove(l.id)} className="lootra-btn-secondary !py-2 text-center text-xs w-full !border-[#FF453A] !text-[#FF453A]" data-testid={`delete-listing-${l.id}`}>
+              Delete listing
+            </button>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
