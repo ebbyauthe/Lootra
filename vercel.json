@@ -3,7 +3,9 @@
     "frontend": {
       "entrypoint": "frontend",
       "routePrefix": "/",
-      "framework": "create-react-app"
+      "framework": null,
+      "buildCommand": "",
+      "outputDirectory": "build"
     },
     "backend": {
       "entrypoint": "backend",

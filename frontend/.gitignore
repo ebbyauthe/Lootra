@@ -9,7 +9,7 @@
 /coverage
 
 # production
-/build
+# /build — committed so Vercel serves pre-built output without a build step
 
 # misc
 .DS_Store
