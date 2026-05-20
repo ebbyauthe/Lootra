@@ -7,6 +7,7 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState("pending");
   const [stats, setStats] = useState({});
   const [pending, setPending] = useState([]);
+  const [active, setActive] = useState([]);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [audit, setAudit] = useState([]);
@@ -14,15 +15,17 @@ export default function AdminDashboard() {
 
   const load = async () => {
     const safe = async (fn) => { try { return await fn(); } catch (e) { toast.error(formatError(e)); return null; } };
-    const [s, p, o, u, a] = await Promise.all([
+    const [s, p, ac, o, u, a] = await Promise.all([
       safe(() => api.get("/admin/stats")),
       safe(() => api.get("/admin/listings", { params: { status: "pending" } })),
+      safe(() => api.get("/admin/listings", { params: { status: "active" } })),
       safe(() => api.get("/admin/orders")),
       safe(() => api.get("/admin/users")),
       safe(() => api.get("/admin/audit", { params: { limit: 100 } })),
     ]);
     if (s) setStats(s.data);
     if (p && Array.isArray(p.data)) setPending(p.data);
+    if (ac && Array.isArray(ac.data)) setActive(ac.data);
     if (o && Array.isArray(o.data)) setOrders(o.data);
     if (u && Array.isArray(u.data)) setUsers(u.data);
     if (a && Array.isArray(a.data)) setAudit(a.data);
@@ -39,7 +42,8 @@ export default function AdminDashboard() {
   };
 
   const TABS = [
-    { id: "pending", label: "Pending listings", count: pending.length },
+    { id: "pending", label: "Pending", count: pending.length },
+    { id: "active", label: "Active listings", count: active.length },
     { id: "orders", label: "All orders", count: orders.length },
     { id: "users", label: "Users", count: users.length },
     { id: "audit", label: "Audit log", count: audit.length },
@@ -57,17 +61,17 @@ export default function AdminDashboard() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="admin-stats">
         {[
-          ["Users", stats.users || 0],
-          ["Pending", stats.listings_pending || 0],
-          ["Active", stats.listings_active || 0],
-          ["Orders", stats.orders_total || 0],
-          ["Held", stats.orders_held || 0],
-          ["Disputed", stats.orders_disputed || 0],
-        ].map(([k, v]) => (
-          <div key={k} className="lootra-card p-4">
+          ["Users", stats.users || 0, "users"],
+          ["Pending", stats.listings_pending || 0, "pending"],
+          ["Active", stats.listings_active || 0, "active"],
+          ["Orders", stats.orders_total || 0, "orders"],
+          ["Held", stats.orders_held || 0, "orders"],
+          ["Disputed", stats.orders_disputed || 0, "orders"],
+        ].map(([k, v, tabId]) => (
+          <button key={k} onClick={() => setTab(tabId)} className="lootra-card p-4 text-left hover:border-[#CCFF00] transition-colors">
             <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">{k}</div>
             <div className="font-mono text-2xl mt-2 text-[#CCFF00]">{v}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -94,6 +98,23 @@ export default function AdminDashboard() {
                 <button onClick={() => peekVault(l.id)} className="lootra-btn-secondary !py-1 !px-2 inline-flex items-center gap-1 text-xs" data-testid={`vault-${l.id}`}><Eye className="w-3 h-3" /> Vault</button>
                 <button onClick={() => approve(l.id)} className="lootra-btn-primary !py-1 !px-2 inline-flex items-center gap-1 text-xs" data-testid={`approve-${l.id}`}><Check className="w-3 h-3" /> Approve</button>
                 <button onClick={() => reject(l.id)} className="lootra-btn-secondary !py-1 !px-2 inline-flex items-center gap-1 text-xs !border-[#FF453A] !text-[#FF453A]" data-testid={`reject-${l.id}`}><X className="w-3 h-3" /> Reject</button>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      )}
+
+      {tab === "active" && (
+        <Table head={["Title", "Game", "Seller", "Price", "Created", "Actions"]}>
+          {active.map((l) => (
+            <tr key={l.id} className="border-t border-[#2A2A2A]">
+              <td className="px-4 py-3 truncate max-w-[260px]">{l.title}</td>
+              <td className="px-4 py-3 text-neutral-400">{l.game}</td>
+              <td className="px-4 py-3 text-neutral-400">@{l.seller_username}</td>
+              <td className="px-4 py-3 font-mono text-[#CCFF00]">${l.price.toFixed(2)}</td>
+              <td className="px-4 py-3 font-mono text-xs text-neutral-500">{new Date(l.created_at).toLocaleDateString()}</td>
+              <td className="px-4 py-3 text-right">
+                <button onClick={() => reject(l.id)} className="lootra-btn-secondary !py-1 !px-2 text-xs !border-[#FF453A] !text-[#FF453A]"><X className="w-3 h-3 inline mr-1" />Remove</button>
               </td>
             </tr>
           ))}
