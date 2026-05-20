@@ -662,6 +662,10 @@ async def root():
 # Include router
 app.include_router(api)
 
+@app.get("/")
+async def health():
+    return {"service": "lootra", "status": "ok"}
+
 # CORS
 _raw_origins = os.environ.get("CORS_ORIGINS", "").strip()
 _origins = [o.strip() for o in _raw_origins.split(",") if o.strip() and o.strip() != "*"]
