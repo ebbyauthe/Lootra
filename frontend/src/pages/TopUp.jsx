@@ -106,7 +106,9 @@ function FiatTab({ onRefresh }) {
         className="lootra-btn-primary w-full"
         data-testid="fiat-pay-btn"
       >
-        {busy ? "Creating payment…" : `Pay ${amount ? `${CURRENCIES.find(c=>c.code===selectedCurrency)?.symbol}${amount}` : ""} with Flutterwave`}
+        {busy ? "Creating payment…" : amount
+          ? `Pay ${CURRENCIES.find(c=>c.code===selectedCurrency)?.symbol}${amount} · Flutterwave`
+          : "Continue to payment"}
       </button>
     </div>
   );

@@ -55,6 +55,7 @@ function CurrencyPicker() {
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  const { formatPrice } = useCurrency();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -87,7 +88,7 @@ export default function Layout({ children }) {
                 </Link>
                 <div className="flex items-center gap-2 px-3 py-2 border border-[#2A2A2A]" data-testid="user-balance">
                   <Wallet className="w-4 h-4 text-[#CCFF00]" />
-                  <span className="font-mono text-xs text-neutral-300">${user.balance?.toFixed(2)}</span>
+                  <span className="font-mono text-xs text-neutral-300">{formatPrice(user.balance)}</span>
                 </div>
                 <Link to={`/user/${user.username}`} className="text-sm text-neutral-400 hover:text-white hover:underline" data-testid="user-username">@{user.username}</Link>
                 <button onClick={async () => { await logout(); nav("/"); }} className="lootra-btn-secondary !py-2 !px-3" data-testid="logout-btn">
@@ -115,7 +116,7 @@ export default function Layout({ children }) {
                 <div className="flex items-center gap-2">
                   <CurrencyPicker />
                   <div className="flex items-center gap-1 font-mono text-xs text-neutral-300">
-                    <Wallet className="w-3.5 h-3.5 text-[#CCFF00]" />${user.balance?.toFixed(2)}
+                    <Wallet className="w-3.5 h-3.5 text-[#CCFF00]" />{formatPrice(user.balance)}
                   </div>
                 </div>
               </div>
