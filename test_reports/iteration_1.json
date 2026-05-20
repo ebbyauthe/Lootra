@@ -1,0 +1,42 @@
+{
+  "summary": "Backend e2e tested via pytest (33 tests). Fixed listing _id leak bug (returned 500). 32/33 passed. Frontend smoke tests: landing, browse, login, register pages render. Admin login blocked at test time due to brute-force lockout from earlier diagnostic curl.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/listings", "issue": "Returned 500 — MongoDB _id leaked into response after insert_one (FIXED by adding doc.pop('_id'))", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout uses request.client.host which behind k8s ingress can be the proxy IP — works for same IP but unreliable. After 1 lockout (429), subsequent attempts returned 401 (suggests IP rotation or rec reset). Consider using X-Forwarded-For + per-email-only counters."},
+      {"endpoint": "CORS middleware", "issue": "CORS_ORIGINS='*' combined with allow_credentials=True is rejected by browsers per CORS spec. Currently works because frontend is same-origin via ingress, but explicit origins should be configured."},
+      {"endpoint": "FastAPI app", "issue": "CORSMiddleware is added AFTER app.include_router(); should be added before for clarity (functionally still works)."},
+      {"endpoint": "Order purchase concurrency", "issue": "No transaction/atomic check between balance debit and listing status update — race-prone under concurrent purchases."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Initial page load", "issue": "/api/auth/me fires on every page returning 401 for guests — produces console errors. Should suppress 401 logs for unauthenticated probe.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_lootra_backend.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Review brute-force lockout reliability behind proxy (use X-Forwarded-For or email-only key)",
+    "Set explicit CORS_ORIGINS instead of '*' with credentials",
+    "Consider order purchase atomicity to prevent double-spend",
+    "Frontend: handle 401 silently from /api/auth/me on initial unauthenticated load"
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~676 lines — consider splitting into routers (auth/listings/orders/admin) before it grows further",
+    "Multiple endpoints insert_one then return mutated doc — pattern is fragile; standardize via a serializer or always pop _id",
+    "encrypt/decrypt uses json.dumps stringify in-route; extract to helper",
+    "No rate limiting on listing creation or order endpoints"
+  ],
+  "updated_files": ["/app/backend/server.py", "/app/backend/tests/test_lootra_backend.py"],
+  "success_rate": {"backend": "97% (32/33)", "frontend": "smoke-only, pages render"},
+  "test_credentials": "Admin: admin@lootra.com / Admin@12345 (test created users on the fly)",
+  "seed_data_creation": "Created per-run unique seller/buyer/listings under TEST_-style suffixes; not cleaned up — safe as unique UUID-prefixed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend critical bug (listing _id leak causing 500) fixed by testing agent. Remaining minor issues are design-level. Full purchase-reveal-confirm-release flow works end-to-end via API. Frontend admin/buyer purchase UI flow not yet validated in browser due to lockout state during test; main agent can self-test or rerun after waiting 15 min for lockout to expire.",
+  "rca of the issue": "POST /api/listings returned 500: motor's insert_one mutates the input dict by attaching MongoDB _id (ObjectId). FastAPI's default JSON encoder cannot serialize ObjectId, raising. Fix: pop _id (and credentials_encrypted) from doc before return. Verified all 32 dependent tests pass after fix."
+}
