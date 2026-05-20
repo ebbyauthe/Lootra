@@ -8,11 +8,14 @@ import os
 import uuid
 import logging
 import secrets
+import hashlib
+import hmac as _hmac
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
 import bcrypt
 import jwt
+import httpx
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Query
 from starlette.middleware.cors import CORSMiddleware
@@ -25,6 +28,15 @@ JWT_ALG = "HS256"
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@lootra.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Admin@12345")
 SIGNUP_BONUS = float(os.environ.get("SIGNUP_BONUS", "500"))
+FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "")
+FLW_PUBLIC_KEY = os.environ.get("FLW_PUBLIC_KEY", "")
+FLW_WEBHOOK_HASH = os.environ.get("FLW_WEBHOOK_HASH", "")
+NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
+NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+SUPPORTED_CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS"]
+FALLBACK_RATES = {"USD": 1.0, "CAD": 1.37, "GBP": 0.79, "EUR": 0.92, "NGN": 1550.0, "GHS": 15.5}
+_rates_cache: dict = {"rates": dict(FALLBACK_RATES), "updated_at": None}
 
 try:
     import traceback as _tb
@@ -86,6 +98,22 @@ def clear_auth_cookies(resp: Response):
     resp.delete_cookie("access_token", path="/")
     resp.delete_cookie("refresh_token", path="/")
 
+async def get_exchange_rates() -> dict:
+    now = now_utc()
+    cached_at = _rates_cache["updated_at"]
+    if cached_at and (now - cached_at).total_seconds() < 3600:
+        return _rates_cache["rates"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://api.exchangerate-api.com/v4/latest/USD")
+            data = r.json()
+            rates = {c: float(data["rates"].get(c, FALLBACK_RATES[c])) for c in SUPPORTED_CURRENCIES}
+            _rates_cache["rates"] = rates
+            _rates_cache["updated_at"] = now
+            return rates
+    except Exception:
+        return _rates_cache["rates"]
+
 def sanitize_user(u: dict) -> dict:
     return {
         "id": u["id"],
@@ -97,6 +125,7 @@ def sanitize_user(u: dict) -> dict:
         "sales_count": u.get("sales_count", 0),
         "is_verified_seller": u.get("is_verified_seller", False),
         "created_at": u.get("created_at"),
+        "preferred_currency": u.get("preferred_currency", "USD"),
     }
 
 async def get_current_user(request: Request) -> dict:
@@ -187,6 +216,17 @@ class MessageIn(BaseModel):
 class RateIn(BaseModel):
     score: int = Field(ge=1, le=5)
     comment: str = Field(default="", max_length=500)
+
+class UpdatePrefsIn(BaseModel):
+    preferred_currency: Optional[str] = None
+
+class TopupFiatIn(BaseModel):
+    amount: float = Field(gt=0)
+    currency: str
+
+class TopupCryptoIn(BaseModel):
+    amount_usd: float = Field(gt=0)
+    pay_currency: str
 
 # ---------------- Startup ----------------
 @app.on_event("startup")
@@ -306,7 +346,16 @@ async def logout(response: Response):
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    # refresh user data
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    return sanitize_user(u)
+
+@api.patch("/auth/me")
+async def update_prefs(data: UpdatePrefsIn, user: dict = Depends(get_current_user)):
+    update = {}
+    if data.preferred_currency and data.preferred_currency in SUPPORTED_CURRENCIES:
+        update["preferred_currency"] = data.preferred_currency
+    if update:
+        await db.users.update_one({"id": user["id"]}, {"$set": update})
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return sanitize_user(u)
 
@@ -678,13 +727,121 @@ async def get_profile(username: str):
         "ratings": ratings,
     }
 
+# ---------------- Currency ----------------
+@api.get("/currency/rates")
+async def currency_rates():
+    return await get_exchange_rates()
+
 # ---------------- Wallet ----------------
-@api.post("/wallet/topup")
-async def wallet_topup(amount: float = Query(gt=0), user: dict = Depends(get_current_user)):
-    """Mock topup — adds funds directly. Replace with Stripe later."""
-    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": amount}})
+@api.post("/wallet/fiat-topup")
+async def fiat_topup(data: TopupFiatIn, user: dict = Depends(get_current_user)):
+    if data.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(400, f"Unsupported currency. Use: {', '.join(SUPPORTED_CURRENCIES)}")
+    if not FLW_SECRET_KEY:
+        raise HTTPException(503, "Fiat payments not configured")
+    rates = await get_exchange_rates()
+    usd_amount = round(data.amount / rates.get(data.currency, 1.0), 4)
+    tx_ref = f"lootra-{uuid.uuid4().hex[:20]}"
+    await db.pending_topups.insert_one({
+        "tx_ref": tx_ref,
+        "user_id": user["id"],
+        "amount": data.amount,
+        "currency": data.currency,
+        "usd_amount": usd_amount,
+        "credited": False,
+        "created_at": now_utc().isoformat(),
+    })
+    payload = {
+        "tx_ref": tx_ref,
+        "amount": data.amount,
+        "currency": data.currency,
+        "redirect_url": f"{FRONTEND_URL}/topup/callback",
+        "customer": {"email": user["email"], "name": user["username"]},
+        "customizations": {
+            "title": "Lootra Wallet Top-up",
+            "description": f"Add {data.amount} {data.currency} to your Lootra wallet",
+        },
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            "https://api.flutterwave.com/v3/payments",
+            json=payload,
+            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
+        )
+    resp = r.json()
+    if resp.get("status") != "success":
+        raise HTTPException(400, resp.get("message", "Payment creation failed"))
+    return {"payment_link": resp["data"]["link"], "tx_ref": tx_ref, "usd_amount": usd_amount}
+
+@api.post("/wallet/fiat-verify")
+async def fiat_verify(
+    transaction_id: str = Query(...),
+    tx_ref: str = Query(...),
+    user: dict = Depends(get_current_user),
+):
+    pending = await db.pending_topups.find_one({"tx_ref": tx_ref, "user_id": user["id"]})
+    if not pending:
+        raise HTTPException(404, "Transaction not found")
+    if pending.get("credited"):
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+        return {"balance": u["balance"], "already_credited": True}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            f"https://api.flutterwave.com/v3/transactions/{transaction_id}/verify",
+            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
+        )
+    vdata = r.json()
+    if vdata.get("status") != "success" or vdata.get("data", {}).get("status") != "successful":
+        raise HTTPException(400, "Payment not confirmed by Flutterwave")
+    tx = vdata["data"]
+    if tx.get("tx_ref") != tx_ref:
+        raise HTTPException(400, "Transaction reference mismatch")
+    if float(tx.get("amount", 0)) < pending["amount"] * 0.99:
+        raise HTTPException(400, "Amount mismatch")
+    usd_amount = pending["usd_amount"]
+    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": usd_amount}})
+    await db.pending_topups.update_one({"tx_ref": tx_ref}, {"$set": {"credited": True, "transaction_id": transaction_id}})
+    await audit("wallet.fiat_topup", user["id"], tx_ref, {"usd_amount": usd_amount, "currency": pending["currency"]})
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-    return {"balance": u["balance"]}
+    return {"balance": u["balance"], "credited_usd": usd_amount}
+
+@api.post("/wallet/crypto-topup")
+async def crypto_topup(data: TopupCryptoIn, user: dict = Depends(get_current_user)):
+    if not NOWPAYMENTS_API_KEY:
+        raise HTTPException(503, "Crypto payments not configured")
+    order_id = f"wallet-{user['id'][:8]}-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "price_amount": data.amount_usd,
+        "price_currency": "usd",
+        "pay_currency": data.pay_currency.lower(),
+        "order_id": order_id,
+        "order_description": "Lootra wallet top-up",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            "https://api.nowpayments.io/v1/payment",
+            json=payload,
+            headers={"x-api-key": NOWPAYMENTS_API_KEY},
+        )
+    resp = r.json()
+    if "payment_id" not in resp:
+        raise HTTPException(400, resp.get("message", "Crypto payment creation failed"))
+    await db.crypto_topups.insert_one({
+        "payment_id": str(resp["payment_id"]),
+        "order_id": order_id,
+        "user_id": user["id"],
+        "amount_usd": data.amount_usd,
+        "pay_currency": data.pay_currency,
+        "credited": False,
+        "created_at": now_utc().isoformat(),
+    })
+    return {
+        "payment_id": resp["payment_id"],
+        "pay_address": resp.get("pay_address"),
+        "pay_amount": resp.get("pay_amount"),
+        "pay_currency": resp.get("pay_currency"),
+        "order_id": order_id,
+    }
 
 # ---------------- Admin ----------------
 @api.get("/admin/stats")
@@ -782,6 +939,46 @@ async def root():
 
 # Include router
 app.include_router(api)
+
+# ---------------- Webhooks ----------------
+@app.post("/api/webhooks/flutterwave")
+async def flutterwave_webhook(request: Request):
+    if FLW_WEBHOOK_HASH:
+        sig = request.headers.get("verif-hash", "")
+        if sig != FLW_WEBHOOK_HASH:
+            raise HTTPException(401, "Invalid webhook signature")
+    body = await request.json()
+    if body.get("event") == "charge.completed":
+        tx = body.get("data", {})
+        if tx.get("status") == "successful":
+            tx_ref = tx.get("tx_ref", "")
+            pending = await db.pending_topups.find_one({"tx_ref": tx_ref})
+            if pending and not pending.get("credited"):
+                await db.users.update_one({"id": pending["user_id"]}, {"$inc": {"balance": pending["usd_amount"]}})
+                await db.pending_topups.update_one({"tx_ref": tx_ref}, {"$set": {"credited": True}})
+                await audit("wallet.fiat_topup_webhook", pending["user_id"], tx_ref, {"usd_amount": pending["usd_amount"]})
+    return {"status": "ok"}
+
+@app.post("/api/webhooks/nowpayments")
+async def nowpayments_webhook(request: Request):
+    body_bytes = await request.body()
+    if NOWPAYMENTS_IPN_SECRET:
+        sig = request.headers.get("x-nowpayments-sig", "")
+        expected = _hmac.new(NOWPAYMENTS_IPN_SECRET.encode(), body_bytes, hashlib.sha512).hexdigest()
+        if not _hmac.compare_digest(sig.lower(), expected.lower()):
+            raise HTTPException(401, "Invalid webhook signature")
+    import json as _json
+    data = _json.loads(body_bytes)
+    if data.get("payment_status") in ("finished", "confirmed"):
+        pt = await db.crypto_topups.find_one({"payment_id": str(data.get("payment_id", ""))})
+        if pt and not pt.get("credited"):
+            await db.users.update_one({"id": pt["user_id"]}, {"$inc": {"balance": pt["amount_usd"]}})
+            await db.crypto_topups.update_one(
+                {"payment_id": str(data["payment_id"])},
+                {"$set": {"credited": True, "status": "finished"}},
+            )
+            await audit("wallet.crypto_topup", pt["user_id"], str(data["payment_id"]), {"amount_usd": pt["amount_usd"]})
+    return {"status": "ok"}
 
 # CORS
 _raw_origins = os.environ.get("CORS_ORIGINS", "").strip()

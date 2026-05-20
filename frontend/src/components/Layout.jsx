@@ -1,12 +1,57 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Shield, Wallet, LogOut, ShieldCheck, Menu, X } from "lucide-react";
+import { Shield, Wallet, LogOut, ShieldCheck, Menu, X, ChevronDown, Plus } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
 
 const navItem = ({ isActive }) =>
   `px-4 py-2 text-sm tracking-tight transition-colors ${
     isActive ? "text-[#CCFF00]" : "text-neutral-400 hover:text-white"
   }`;
+
+function CurrencyPicker() {
+  const { currency, setCurrency } = useCurrency();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const curr = CURRENCIES.find((c) => c.code === currency);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2 py-1.5 border border-[#2A2A2A] text-xs font-mono text-neutral-400 hover:text-white hover:border-neutral-500 transition-colors"
+        data-testid="currency-picker"
+      >
+        <span>{curr?.flag}</span>
+        <span>{currency}</span>
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-48 bg-[#111] border border-[#2A2A2A] z-50 py-1">
+          {CURRENCIES.map((c) => (
+            <button
+              key={c.code}
+              onClick={() => { setCurrency(c.code); setOpen(false); }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                c.code === currency ? "text-[#CCFF00] bg-[#CCFF00]/5" : "text-neutral-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <span>{c.flag}</span>
+              <span className="font-mono">{c.code}</span>
+              <span className="text-neutral-500 ml-auto">{c.symbol}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
@@ -32,9 +77,14 @@ export default function Layout({ children }) {
             {user?.role === "admin" && <NavLink to="/admin" className={navItem} data-testid="nav-admin">Admin</NavLink>}
           </nav>
 
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2">
+            <CurrencyPicker />
             {user ? (
               <>
+                <Link to="/topup" className="flex items-center gap-1.5 px-3 py-2 border border-[#2A2A2A] text-xs font-mono text-neutral-400 hover:text-[#CCFF00] hover:border-[#CCFF00]/30 transition-colors" data-testid="topup-btn">
+                  <Plus className="w-3.5 h-3.5" />
+                  Top Up
+                </Link>
                 <div className="flex items-center gap-2 px-3 py-2 border border-[#2A2A2A]" data-testid="user-balance">
                   <Wallet className="w-4 h-4 text-[#CCFF00]" />
                   <span className="font-mono text-xs text-neutral-300">${user.balance?.toFixed(2)}</span>
@@ -62,14 +112,20 @@ export default function Layout({ children }) {
             {user && (
               <div className="flex items-center justify-between py-2 border-b border-[#2A2A2A] mb-1">
                 <Link to={`/user/${user.username}`} onClick={() => setOpen(false)} className="text-sm font-medium text-[#CCFF00] hover:underline">@{user.username}</Link>
-                <div className="flex items-center gap-1 font-mono text-xs text-neutral-300">
-                  <Wallet className="w-3.5 h-3.5 text-[#CCFF00]" />${user.balance?.toFixed(2)}
+                <div className="flex items-center gap-2">
+                  <CurrencyPicker />
+                  <div className="flex items-center gap-1 font-mono text-xs text-neutral-300">
+                    <Wallet className="w-3.5 h-3.5 text-[#CCFF00]" />${user.balance?.toFixed(2)}
+                  </div>
                 </div>
               </div>
             )}
             <NavLink to="/browse" className={navItem} onClick={() => setOpen(false)}>Browse</NavLink>
             {user?.role !== "admin" && <NavLink to="/sell" className={navItem} onClick={() => setOpen(false)}>Sell</NavLink>}
             {user && user.role !== "admin" && <NavLink to="/dashboard" className={navItem} onClick={() => setOpen(false)}>Dashboard</NavLink>}
+            {user && user.role !== "admin" && (
+              <NavLink to="/topup" className={navItem} onClick={() => setOpen(false)}>Top Up Wallet</NavLink>
+            )}
             {user?.role === "admin" && <NavLink to="/admin" className={navItem} onClick={() => setOpen(false)}>Admin</NavLink>}
             {!user && (
               <div className="flex gap-2 pt-2">

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Plus, Wallet, ShoppingBag, Tag, Heart } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useCurrency } from "../context/CurrencyContext";
 
 function Stat({ label, value, icon: Icon }) {
   return (
@@ -23,7 +24,8 @@ const STATUS_COLORS = {
 };
 
 export default function Dashboard() {
-  const { user, refresh } = useAuth();
+  const { user } = useAuth();
+  const { formatPrice } = useCurrency();
   const [tab, setTab] = useState("purchases");
   const [purchases, setPurchases] = useState([]);
   const [sales, setSales] = useState([]);
@@ -42,11 +44,6 @@ export default function Dashboard() {
 
   useEffect(() => { load().catch(() => {}); }, []);
 
-  const topup = async () => {
-    try { await api.post(`/wallet/topup?amount=500`); toast.success("$500 added"); await refresh(); }
-    catch (e) { toast.error(formatError(e)); }
-  };
-
   const TABS = [
     { id: "purchases", label: "Purchases", count: purchases.length },
     { id: "sales", label: "Sales", count: sales.length },
@@ -63,13 +60,13 @@ export default function Dashboard() {
           <p className="text-sm text-neutral-400 mt-1">Manage purchases, listings, and your escrow wallet.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={topup} className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="topup-btn"><Wallet className="w-4 h-4" /> +$500</button>
+          <Link to="/topup" className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="topup-link"><Wallet className="w-4 h-4" /> Top Up</Link>
           <Link to="/sell" className="lootra-btn-primary inline-flex items-center gap-2" data-testid="new-listing-btn"><Plus className="w-4 h-4" /> New listing</Link>
         </div>
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Wallet" value={`$${user?.balance?.toFixed(2)}`} icon={Wallet} />
+        <Stat label="Wallet" value={formatPrice(user?.balance)} icon={Wallet} />
         <Stat label="Purchases" value={purchases.length} icon={ShoppingBag} />
         <Stat label="Active Listings" value={listings.filter(l => l.status === "active").length} icon={Tag} />
         <Stat label="Trust score" value={user?.trust_score || 0} icon={Heart} />

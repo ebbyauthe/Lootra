@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { ShieldCheck, Eye } from "lucide-react";
+import { useCurrency } from "../context/CurrencyContext";
 
 const PLACEHOLDERS = [
   "https://images.unsplash.com/photo-1775801535042-52672e4d93ca?crop=entropy&cs=srgb&fm=jpg&q=85&w=800",
@@ -10,6 +11,7 @@ const PLACEHOLDERS = [
 ];
 
 export default function ListingCard({ listing, onClickOverride }) {
+  const { formatPrice, currency } = useCurrency();
   const img = listing.screenshots?.[0] || PLACEHOLDERS[(listing.title?.length || 0) % PLACEHOLDERS.length];
   return (
     <Link to={`/listing/${listing.id}`} onClick={onClickOverride ? (e) => { e.preventDefault(); onClickOverride(); } : undefined} className="lootra-card group block" data-testid={`listing-card-${listing.id}`}>
@@ -35,8 +37,8 @@ export default function ListingCard({ listing, onClickOverride }) {
             <h3 className="text-base font-medium truncate mt-1">{listing.title}</h3>
           </div>
           <div className="text-right shrink-0">
-            <div className="font-mono text-[#CCFF00] text-lg leading-tight">${listing.price?.toFixed(2)}</div>
-            <div className="text-[10px] uppercase font-mono text-neutral-500 tracking-widest">USD</div>
+            <div className="font-mono text-[#CCFF00] text-lg leading-tight">{formatPrice(listing.price)}</div>
+            <div className="text-[10px] uppercase font-mono text-neutral-500 tracking-widest">{currency}</div>
           </div>
         </div>
         <div className="flex items-center justify-between text-xs text-neutral-500 font-mono pt-2 border-t border-[#2A2A2A]">

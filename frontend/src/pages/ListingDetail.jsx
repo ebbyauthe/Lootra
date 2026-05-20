@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ShieldCheck, Lock, MapPin, Trophy, Star, Heart } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useCurrency } from "../context/CurrencyContext";
 
 const PLACEHOLDER = "https://images.unsplash.com/photo-1775801535042-52672e4d93ca?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200";
 
@@ -11,6 +12,7 @@ export default function ListingDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const { user, refresh } = useAuth();
+  const { formatPrice, currency } = useCurrency();
   const [listing, setListing] = useState(null);
   const [activeImg, setActiveImg] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -94,7 +96,10 @@ export default function ListingDetail() {
         <div className="lootra-card p-6 space-y-4">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Price</div>
-            <div className="font-mono text-3xl text-[#CCFF00] mt-1" data-testid="listing-price">${listing.price?.toFixed(2)}</div>
+            <div className="font-mono text-3xl text-[#CCFF00] mt-1" data-testid="listing-price">{formatPrice(listing.price)}</div>
+            {currency !== "USD" && (
+              <div className="text-xs text-neutral-500 font-mono mt-0.5">= ${listing.price?.toFixed(2)} USD</div>
+            )}
           </div>
           <div className="text-xs text-neutral-400 flex items-start gap-2">
             <Lock className="w-4 h-4 text-[#CCFF00] shrink-0 mt-0.5" />

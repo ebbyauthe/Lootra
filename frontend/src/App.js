@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
+import { CurrencyProvider } from "./context/CurrencyContext";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -15,30 +16,36 @@ import CreateListing from "./pages/CreateListing";
 import OrderDetail from "./pages/OrderDetail";
 import AdminDashboard from "./pages/AdminDashboard";
 import ProfilePage from "./pages/ProfilePage";
+import TopUp from "./pages/TopUp";
+import TopUpCallback from "./pages/TopUpCallback";
 
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/browse" element={<Browse />} />
-            <Route path="/listing/:id" element={<ListingDetail />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/dashboard" element={<ProtectedRoute noAdmin><Dashboard /></ProtectedRoute>} />
-            <Route path="/sell" element={<ProtectedRoute noAdmin><CreateListing /></ProtectedRoute>} />
-            <Route path="/order/:id" element={<ProtectedRoute><OrderDetail /></ProtectedRoute>} />
-            <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/user/:username" element={<ProfilePage />} />
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-        </Layout>
-      </BrowserRouter>
-      <Toaster theme="dark" position="top-right" toastOptions={{
-        style: { background: "#121212", border: "1px solid #2A2A2A", color: "#F3F4F6", borderRadius: 0 },
-      }} />
+      <CurrencyProvider>
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/browse" element={<Browse />} />
+              <Route path="/listing/:id" element={<ListingDetail />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/dashboard" element={<ProtectedRoute noAdmin><Dashboard /></ProtectedRoute>} />
+              <Route path="/sell" element={<ProtectedRoute noAdmin><CreateListing /></ProtectedRoute>} />
+              <Route path="/order/:id" element={<ProtectedRoute><OrderDetail /></ProtectedRoute>} />
+              <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+              <Route path="/user/:username" element={<ProfilePage />} />
+              <Route path="/topup" element={<ProtectedRoute noAdmin><TopUp /></ProtectedRoute>} />
+              <Route path="/topup/callback" element={<ProtectedRoute noAdmin><TopUpCallback /></ProtectedRoute>} />
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+        <Toaster theme="dark" position="top-right" toastOptions={{
+          style: { background: "#121212", border: "1px solid #2A2A2A", color: "#F3F4F6", borderRadius: 0 },
+        }} />
+      </CurrencyProvider>
     </AuthProvider>
   );
 }
