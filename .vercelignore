@@ -1,0 +1,12 @@
+node_modules
+frontend/node_modules
+frontend/build
+**/__pycache__
+.env
+backend/.venv
+tests
+test_reports
+memory
+.git
+*.log
+.DS_Store
