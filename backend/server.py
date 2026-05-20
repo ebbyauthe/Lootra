@@ -221,7 +221,11 @@ async def startup():
             {"id": "genshin", "name": "Genshin Impact", "platform": "Mobile"},
             {"id": "pubg", "name": "PUBG", "platform": "PC"},
             {"id": "rocketleague", "name": "Rocket League", "platform": "PC"},
+            {"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"},
         ])
+    # Migrations: insert new games if not present
+    if not await db.games.find_one({"id": "bloodstrike"}):
+        await db.games.insert_one({"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"})
 
 # ---------------- Auth ----------------
 @api.post("/auth/register")
