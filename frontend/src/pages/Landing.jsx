@@ -45,7 +45,7 @@ const FEATURES = [
 export default function Landing() {
   const [featured, setFeatured] = useState([]);
   useEffect(() => {
-    api.get("/listings?limit=6").then(({ data }) => setFeatured(data)).catch(() => {});
+    api.get("/listings?limit=6").then(({ data }) => { if (Array.isArray(data)) setFeatured(data); }).catch(() => {});
   }, []);
 
   return (

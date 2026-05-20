@@ -11,7 +11,7 @@ export default function Browse() {
     q: "", game: "", platform: "", region: "", min_price: "", max_price: "", verified: "", sort: "newest",
   });
 
-  useEffect(() => { api.get("/catalog/games").then(({ data }) => setGames(data)).catch(() => {}); }, []);
+  useEffect(() => { api.get("/catalog/games").then(({ data }) => { if (Array.isArray(data)) setGames(data); }).catch(() => {}); }, []);
 
   const fetchListings = async () => {
     setLoading(true);
@@ -19,7 +19,7 @@ export default function Browse() {
     Object.entries(filters).forEach(([k, v]) => { if (v !== "" && v !== null) params[k] = v; });
     try {
       const { data } = await api.get("/listings", { params });
-      setListings(data);
+      if (Array.isArray(data)) setListings(data);
     } finally { setLoading(false); }
   };
 
