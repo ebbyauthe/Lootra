@@ -224,8 +224,14 @@ async def startup():
             {"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"},
         ])
     # Migrations: insert new games if not present
-    if not await db.games.find_one({"id": "bloodstrike"}):
-        await db.games.insert_one({"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"})
+    for g in [
+        {"id": "bloodstrike", "name": "Blood Strike", "platform": "Mobile"},
+        {"id": "efootball",   "name": "eFootball",    "platform": "Mobile"},
+        {"id": "pubgmobile",  "name": "PUBG Mobile",  "platform": "Mobile"},
+        {"id": "codm",        "name": "Call of Duty: Mobile", "platform": "Mobile"},
+    ]:
+        if not await db.games.find_one({"id": g["id"]}):
+            await db.games.insert_one(g)
 
 # ---------------- Auth ----------------
 @api.post("/auth/register")

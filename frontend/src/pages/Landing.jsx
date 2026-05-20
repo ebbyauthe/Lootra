@@ -11,28 +11,28 @@ const GAMES = [
     name: "eFootball",
     tag: "FOOTBALL",
     desc: "Elite squads, top-rated players and ranked accounts.",
-    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/1665460/capsule_616x353.jpg",
+    img: "https://cdn.akamai.steamstatic.com/steam/apps/1665460/header.jpg",
   },
   {
     id: "bloodstrike",
     name: "Blood Strike",
     tag: "FPS · MOBILE",
     desc: "High-rank and exclusive skin accounts for the arena.",
-    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/3199170/capsule_616x353.jpg",
+    img: "https://cdn.akamai.steamstatic.com/steam/apps/3199170/header.jpg",
   },
   {
     id: "codm",
     name: "Call of Duty: Mobile",
     tag: "BATTLE ROYALE",
     desc: "Max-level accounts with rare operators and blueprints.",
-    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/1938090/capsule_616x353.jpg",
+    img: "https://cdn.akamai.steamstatic.com/steam/apps/1938090/header.jpg",
   },
   {
-    id: "pubg",
+    id: "pubgmobile",
     name: "PUBG Mobile",
     tag: "BATTLE ROYALE",
     desc: "Conqueror-tier accounts, rare outfits and weapon skins.",
-    img: "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/578080/capsule_616x353.jpg",
+    img: "https://cdn.akamai.steamstatic.com/steam/apps/578080/header.jpg",
   },
 ];
 
