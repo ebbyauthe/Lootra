@@ -1,11 +1,4 @@
 {
-  "buildCommand": "echo 'Using pre-built frontend'",
-  "outputDirectory": "frontend/build",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "backend/**"
-    }
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" },
     { "source": "/(.*)", "destination": "/index.html" }
