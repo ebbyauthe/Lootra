@@ -1,7 +1,7 @@
 import traceback
 
 try:
-    from server import app
+    from _server import app
 except Exception as _e:
     try:
         from fastapi import FastAPI
