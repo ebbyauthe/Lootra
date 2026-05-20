@@ -6,7 +6,10 @@
     "node": "24.x"
   },
   "overrides": {
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "fork-ts-checker-webpack-plugin": {
+      "ajv": "^6.12.6"
+    }
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
