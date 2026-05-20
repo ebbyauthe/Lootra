@@ -18,21 +18,26 @@ function StarRow({ score }) {
 export default function ProfilePage() {
   const { username } = useParams();
   const [profile, setProfile] = useState(null);
-  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    setProfile(null); setError(null);
     api.get(`/users/${username}`)
       .then(({ data }) => setProfile(data))
-      .catch((e) => {
-        if (e?.response?.status === 404) setNotFound(true);
-        else toast.error(formatError(e));
-      });
+      .catch((e) => setError(e?.response?.status === 404 ? "not_found" : formatError(e)));
   }, [username]);
 
-  if (notFound) return (
+  if (error === "not_found") return (
     <div className="max-w-2xl mx-auto py-20 text-center font-mono text-neutral-500">
       <div className="text-4xl mb-4">404</div>
       <div>User <span className="text-white">@{username}</span> not found.</div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="max-w-2xl mx-auto py-20 text-center font-mono text-neutral-500">
+      <div className="text-red-400 mb-2">Failed to load profile</div>
+      <div className="text-xs">{error}</div>
     </div>
   );
 
