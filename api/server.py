@@ -64,8 +64,8 @@ def make_refresh_token(uid: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 def set_auth_cookies(resp: Response, access: str, refresh: str):
-    resp.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=43200, path="/")
-    resp.set_cookie("refresh_token", refresh, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+    resp.set_cookie("access_token", access, httponly=True, secure=True, samesite="none", max_age=43200, path="/")
+    resp.set_cookie("refresh_token", refresh, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
 
 def clear_auth_cookies(resp: Response):
     resp.delete_cookie("access_token", path="/")
@@ -663,10 +663,13 @@ async def root():
 app.include_router(api)
 
 # CORS
+_raw_origins = os.environ.get("CORS_ORIGINS", "").strip()
+_origins = [o.strip() for o in _raw_origins.split(",") if o.strip() and o.strip() != "*"]
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=_origins if _origins else [],
+    allow_origin_regex=r"https?://localhost(:\d+)?|https://.*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
