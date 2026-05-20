@@ -913,6 +913,22 @@ async def admin_users(_: dict = Depends(require_admin)):
 async def admin_ban(user_id: str, admin: dict = Depends(require_admin)):
     await db.users.update_one({"id": user_id}, {"$set": {"role": "banned"}})
     await audit("user.ban", admin["id"], user_id)
+
+@api.post("/admin/users/{user_id}/set-balance")
+async def admin_set_balance(user_id: str, amount: float = Query(ge=0), admin: dict = Depends(require_admin)):
+    await db.users.update_one({"id": user_id}, {"$set": {"balance": amount}})
+    await audit("wallet.admin_set", admin["id"], user_id, {"balance": amount})
+    return {"ok": True}
+
+@api.post("/admin/reset-test-balances")
+async def reset_test_balances(admin: dict = Depends(require_admin)):
+    """Zero out balances on all non-admin accounts that never made a real deposit."""
+    result = await db.users.update_many(
+        {"role": {"$ne": "admin"}, "balance": {"$gt": 0}},
+        {"$set": {"balance": 0.0}}
+    )
+    await audit("wallet.reset_test_balances", admin["id"], "all_users", {"affected": result.modified_count})
+    return {"zeroed": result.modified_count}
     return {"ok": True}
 
 @api.get("/admin/audit")
