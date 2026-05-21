@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, CheckCircle, AlertTriangle, Star, Send, Shield, Lock } from "lucide-react";
+import { Eye, EyeOff, CheckCircle, AlertTriangle, Star, Send, Shield, Lock, Image, Clock, X } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import EscrowStepper from "../components/EscrowStepper";
@@ -11,24 +11,52 @@ const STATUS_COLOR = {
   RELEASED: "text-[#CCFF00]", DISPUTED: "text-red-400", REFUNDED: "text-neutral-400",
 };
 
+function useCountdown(deadline) {
+  const [remaining, setRemaining] = useState(null);
+  useEffect(() => {
+    if (!deadline) return;
+    const tick = () => {
+      const diff = new Date(deadline) - new Date();
+      setRemaining(Math.max(0, Math.floor(diff / 1000)));
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [deadline]);
+  return remaining;
+}
+
+function formatCountdown(secs) {
+  if (secs === null) return null;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function OrderDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const [order, setOrder] = useState(null);
   const [messages, setMessages] = useState([]);
   const [msgText, setMsgText] = useState("");
+  const [msgImage, setMsgImage] = useState(null);
   const [creds, setCreds] = useState(null);
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
+  const [complaintOpen, setComplaintOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [confirmScreenshot, setConfirmScreenshot] = useState(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [score, setScore] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
   const [rated, setRated] = useState(false);
   const chatRef = useRef(null);
   const pollRef = useRef(null);
+  const fileRef = useRef(null);
+  const confirmFileRef = useRef(null);
 
   const loadOrder = useCallback(async () => {
     try { const { data } = await api.get(`/orders/${id}`); setOrder(data); } catch (e) { toast.error(formatError(e)); }
@@ -41,7 +69,7 @@ export default function OrderDetail() {
   useEffect(() => {
     loadOrder();
     loadMessages();
-    pollRef.current = setInterval(loadMessages, 5000);
+    pollRef.current = setInterval(() => { loadMessages(); loadOrder(); }, 5000);
     return () => clearInterval(pollRef.current);
   }, [loadOrder, loadMessages]);
 
@@ -49,14 +77,30 @@ export default function OrderDetail() {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
+  const toBase64 = (file) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+
+  const handleImagePick = async (e, setter) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) { toast.error("Image must be under 3MB"); return; }
+    const b64 = await toBase64(file);
+    setter(b64);
+  };
+
   const sendMsg = async (e) => {
     e.preventDefault();
-    if (!msgText.trim()) return;
+    if (!msgText.trim() && !msgImage) return;
     setSending(true);
     try {
-      const { data } = await api.post(`/orders/${id}/messages`, { content: msgText.trim() });
+      const { data } = await api.post(`/orders/${id}/messages`, { content: msgText.trim(), image: msgImage });
       setMessages((m) => [...m, data]);
       setMsgText("");
+      setMsgImage(null);
     } catch (e) { toast.error(formatError(e)); }
     finally { setSending(false); }
   };
@@ -74,8 +118,12 @@ export default function OrderDetail() {
 
   const confirm = async () => {
     setBusy(true);
-    try { await api.post(`/orders/${id}/confirm`); toast.success("Funds released to seller"); await loadOrder(); }
-    catch (e) { toast.error(formatError(e)); }
+    try {
+      await api.post(`/orders/${id}/confirm`, { screenshot: confirmScreenshot });
+      toast.success("Account secured — 24-hour complaint window started");
+      setConfirmOpen(false); setConfirmScreenshot(null);
+      await loadOrder();
+    } catch (e) { toast.error(formatError(e)); }
     finally { setBusy(false); }
   };
 
@@ -90,6 +138,17 @@ export default function OrderDetail() {
     finally { setBusy(false); }
   };
 
+  const complaint = async () => {
+    if (reason.length < 10) { toast.error("Describe the issue (min 10 chars)"); return; }
+    setBusy(true);
+    try {
+      await api.post(`/orders/${id}/complaint`, { reason });
+      toast.success("Complaint raised — admin will review");
+      setComplaintOpen(false); setReason(""); await loadOrder();
+    } catch (e) { toast.error(formatError(e)); }
+    finally { setBusy(false); }
+  };
+
   const submitRating = async () => {
     setBusy(true);
     try {
@@ -100,14 +159,21 @@ export default function OrderDetail() {
     finally { setBusy(false); }
   };
 
-  if (!order) return <div className="font-mono text-xs text-neutral-500 p-12">Loading order…</div>;
-
-  const isBuyer = user?.id === order.buyer_id;
-  const isSeller = user?.id === order.seller_id;
-  const counterparty = isBuyer ? `@${order.seller_username}` : `@${order.buyer_username}`;
-  const counterpartyUsername = isBuyer ? order.seller_username : order.buyer_username;
-  const tradeDone = ["RELEASED", "REFUNDED"].includes(order.status);
+  const isBuyer = user?.id === order?.buyer_id;
+  const isSeller = user?.id === order?.seller_id;
+  const isAdmin = user?.role === "admin";
+  const counterparty = isBuyer ? `@${order?.seller_username}` : `@${order?.buyer_username}`;
+  const counterpartyUsername = isBuyer ? order?.seller_username : order?.buyer_username;
+  const tradeDone = ["RELEASED", "REFUNDED"].includes(order?.status);
   const canRate = tradeDone && !rated && (isBuyer || isSeller);
+  const inHandover = ["PAID", "DELIVERED"].includes(order?.status);
+  const isConfirmed = order?.status === "CONFIRMED";
+  const complaintWindowOpen = isConfirmed && order?.complaint_window_until && new Date(order.complaint_window_until) > new Date();
+
+  const handoverSecs = useCountdown(inHandover ? order?.handover_deadline : null);
+  const complaintSecs = useCountdown(complaintWindowOpen ? order?.complaint_window_until : null);
+
+  if (!order) return <div className="font-mono text-xs text-neutral-500 p-12">Loading order…</div>;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in" data-testid="order-detail">
@@ -121,7 +187,8 @@ export default function OrderDetail() {
             <span>·</span>
             <span className="text-[#CCFF00]">${order.amount?.toFixed(2)}</span>
             <span>·</span>
-            <Link to={`/user/${counterpartyUsername}`} className="hover:text-white hover:underline">{counterparty}</Link>
+            {!isAdmin && <Link to={`/user/${counterpartyUsername}`} className="hover:text-white hover:underline">{counterparty}</Link>}
+            {isAdmin && <span>Buyer: @{order.buyer_username} · Seller: @{order.seller_username}</span>}
           </div>
         </div>
         {canRate && (
@@ -130,6 +197,28 @@ export default function OrderDetail() {
           </button>
         )}
       </div>
+
+      {/* Handover countdown */}
+      {inHandover && handoverSecs !== null && (
+        <div className={`border p-4 flex items-center gap-3 font-mono text-sm ${handoverSecs < 300 ? "border-red-500/50 bg-red-500/5 text-red-400" : "border-yellow-500/50 bg-yellow-500/5 text-yellow-400"}`}>
+          <Clock className="w-4 h-4 shrink-0" />
+          <div>
+            <div className="font-semibold">Handover deadline: {formatCountdown(handoverSecs)}</div>
+            <div className="text-xs text-neutral-500 mt-0.5">If the account is not handed over in time, the dispute will be auto-triggered and the buyer will be refunded.</div>
+          </div>
+        </div>
+      )}
+
+      {/* Complaint window countdown */}
+      {complaintWindowOpen && complaintSecs !== null && isBuyer && (
+        <div className="border border-blue-500/50 bg-blue-500/5 p-4 flex items-center gap-3 font-mono text-sm text-blue-400">
+          <Clock className="w-4 h-4 shrink-0" />
+          <div>
+            <div className="font-semibold">Complaint window: {formatCountdown(complaintSecs)}</div>
+            <div className="text-xs text-neutral-500 mt-0.5">If the seller reclaims the account, raise a complaint before this window closes.</div>
+          </div>
+        </div>
+      )}
 
       <EscrowStepper status={order.status} />
 
@@ -166,14 +255,23 @@ export default function OrderDetail() {
                   </div>
                 )}
 
-                {order.status === "DELIVERED" && (
+                {["PAID", "DELIVERED"].includes(order.status) && (
                   <div className="flex flex-wrap gap-2 pt-3 border-t border-[#2A2A2A]">
-                    <button onClick={confirm} disabled={busy} className="lootra-btn-primary inline-flex items-center gap-2" data-testid="confirm-order-btn">
-                      <CheckCircle className="w-4 h-4" /> Confirm access — release funds
+                    <button onClick={() => setConfirmOpen(true)} disabled={busy} className="lootra-btn-primary inline-flex items-center gap-2" data-testid="confirm-order-btn">
+                      <CheckCircle className="w-4 h-4" /> I've secured the account
                     </button>
                     <button onClick={() => setDisputeOpen(true)} className="lootra-btn-secondary inline-flex items-center gap-2 !border-red-500/50 !text-red-400" data-testid="dispute-order-btn">
                       <AlertTriangle className="w-4 h-4" /> Dispute
                     </button>
+                  </div>
+                )}
+
+                {complaintWindowOpen && (
+                  <div className="pt-3 border-t border-[#2A2A2A]">
+                    <button onClick={() => { setReason(""); setComplaintOpen(true); }} className="lootra-btn-secondary inline-flex items-center gap-2 !border-red-500/50 !text-red-400 text-sm">
+                      <AlertTriangle className="w-4 h-4" /> Raise a complaint
+                    </button>
+                    <p className="text-xs text-neutral-500 mt-2">Use this if the seller reclaimed the account after you confirmed.</p>
                   </div>
                 )}
               </>
@@ -181,10 +279,17 @@ export default function OrderDetail() {
 
             {isSeller && (
               <div className="text-sm text-neutral-400 space-y-2">
-                <p>Credentials are held in the encrypted vault until the buyer reveals them.</p>
-                {order.status === "PAID" && <p className="text-yellow-400 font-mono text-xs">⏳ Waiting for buyer to reveal credentials.</p>}
-                {order.status === "DELIVERED" && <p className="text-blue-400 font-mono text-xs">👁 Buyer has revealed credentials. Awaiting confirmation.</p>}
+                <p>Credentials are held in the encrypted vault. Work with the buyer in chat to complete the handover.</p>
+                {order.status === "PAID" && <p className="text-yellow-400 font-mono text-xs">⏳ Buyer has not revealed credentials yet. Help them via chat.</p>}
+                {order.status === "DELIVERED" && <p className="text-blue-400 font-mono text-xs">👁 Buyer revealed credentials — assist with verification codes in chat.</p>}
+                {order.status === "CONFIRMED" && <p className="text-green-400 font-mono text-xs">✓ Buyer confirmed access. Funds release after 24h complaint window.</p>}
                 {order.status === "RELEASED" && <p className="text-[#CCFF00] font-mono text-xs">✓ Funds released to your wallet.</p>}
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="text-sm text-neutral-400">
+                <p className="font-mono text-xs text-[#CCFF00] mb-2">Admin view — oversee handover and settle disputes from the admin dashboard.</p>
               </div>
             )}
           </div>
@@ -199,6 +304,7 @@ export default function OrderDetail() {
               ["Amount", `$${order.amount?.toFixed(2)}`],
               ["Buyer", `@${order.buyer_username}`],
               ["Seller", `@${order.seller_username}`],
+              ...(order.handover_deadline ? [["Handover deadline", new Date(order.handover_deadline).toLocaleString()]] : []),
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between text-sm border-b border-[#1A1A1A] pb-2">
                 <span className="text-neutral-500 font-mono text-xs">{k}</span>
@@ -225,11 +331,11 @@ export default function OrderDetail() {
         <div className="lootra-card flex flex-col" style={{ height: "600px" }}>
           <div className="p-4 border-b border-[#2A2A2A] flex items-center gap-3">
             <div className="w-8 h-8 bg-[#1A1A1A] flex items-center justify-center text-xs font-mono font-bold text-[#CCFF00]">
-              {counterpartyUsername?.[0]?.toUpperCase()}
+              {isAdmin ? "A" : counterpartyUsername?.[0]?.toUpperCase()}
             </div>
             <div>
-              <div className="text-sm font-medium">{counterparty}</div>
-              <div className="text-[10px] text-neutral-500 font-mono">{tradeDone ? "Trade complete" : "Online"}</div>
+              <div className="text-sm font-medium">{isAdmin ? "Order chat" : counterparty}</div>
+              <div className="text-[10px] text-neutral-500 font-mono">{tradeDone ? "Trade complete" : "Buyer · Seller · Admin"}</div>
             </div>
             <Shield className="w-4 h-4 text-[#CCFF00] ml-auto" />
           </div>
@@ -238,21 +344,29 @@ export default function OrderDetail() {
             {messages.length === 0 && (
               <div className="text-center text-neutral-600 pt-8">
                 <Shield className="w-8 h-8 mx-auto mb-2 text-neutral-700" />
-                <div>Encrypted trade chat</div>
-                <div className="text-[10px] mt-1 text-neutral-700">Messages are private to this order.</div>
+                <div>3-way trade chat</div>
+                <div className="text-[10px] mt-1 text-neutral-700">Buyer, seller and admin can all message here.</div>
               </div>
             )}
             {messages.map((m) => {
               const isMe = m.sender_id === user?.id;
               return (
                 <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                  <div className={`max-w-[75%] px-3 py-2 text-xs leading-relaxed ${
+                  <div className={`max-w-[80%] px-3 py-2 text-xs leading-relaxed ${
                     m.is_admin ? "bg-[rgba(204,255,0,0.1)] border border-[rgba(204,255,0,0.3)] text-[#CCFF00]"
                     : isMe ? "bg-[#1E1E1E] text-neutral-100"
                     : "bg-[#141414] text-neutral-300"
                   }`}>
                     {!isMe && <div className="text-[10px] text-neutral-500 mb-1">{m.is_admin ? "🛡 Admin" : `@${m.sender_username}`}</div>}
-                    {m.content}
+                    {m.content && <div>{m.content}</div>}
+                    {m.image && (
+                      <img
+                        src={m.image}
+                        alt="screenshot"
+                        className="mt-2 max-w-full rounded cursor-pointer"
+                        onClick={() => window.open(m.image, "_blank")}
+                      />
+                    )}
                   </div>
                   <div className="text-[10px] text-neutral-600 mt-1">{new Date(m.created_at).toLocaleTimeString()}</div>
                 </div>
@@ -260,12 +374,24 @@ export default function OrderDetail() {
             })}
           </div>
 
+          {/* Image preview */}
+          {msgImage && (
+            <div className="px-3 pt-2 border-t border-[#2A2A2A] flex items-center gap-2">
+              <img src={msgImage} alt="preview" className="h-14 object-cover" />
+              <button onClick={() => setMsgImage(null)} className="text-neutral-500 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+          )}
+
           {tradeDone ? (
             <div className="p-4 border-t border-[#2A2A2A] text-center text-xs text-neutral-600 font-mono">
               Chat closed — trade complete
             </div>
           ) : (
             <form onSubmit={sendMsg} className="p-3 border-t border-[#2A2A2A] flex gap-2">
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleImagePick(e, setMsgImage)} />
+              <button type="button" onClick={() => fileRef.current?.click()} className="lootra-btn-secondary !py-2 !px-2 shrink-0">
+                <Image className="w-4 h-4" />
+              </button>
               <input
                 className="lootra-input flex-1 !py-2 text-sm"
                 placeholder="Message…"
@@ -273,13 +399,35 @@ export default function OrderDetail() {
                 onChange={(e) => setMsgText(e.target.value)}
                 disabled={sending}
               />
-              <button type="submit" disabled={sending || !msgText.trim()} className="lootra-btn-primary !py-2 !px-3">
+              <button type="submit" disabled={sending || (!msgText.trim() && !msgImage)} className="lootra-btn-primary !py-2 !px-3">
                 <Send className="w-4 h-4" />
               </button>
             </form>
           )}
         </div>
       </div>
+
+      {/* Confirm modal */}
+      {confirmOpen && (
+        <Modal onClose={() => { setConfirmOpen(false); setConfirmScreenshot(null); }} title="Confirm account secured">
+          <p className="text-sm text-neutral-400 mb-4">Upload a screenshot showing you have access to the account. This starts the 24-hour complaint window before funds are released.</p>
+          <input ref={confirmFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleImagePick(e, setConfirmScreenshot)} />
+          {confirmScreenshot ? (
+            <div className="relative mb-4">
+              <img src={confirmScreenshot} alt="confirmation" className="w-full max-h-48 object-contain border border-[#2A2A2A]" />
+              <button onClick={() => setConfirmScreenshot(null)} className="absolute top-2 right-2 bg-black/70 p-1 text-neutral-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+          ) : (
+            <button onClick={() => confirmFileRef.current?.click()} className="lootra-btn-secondary w-full inline-flex items-center justify-center gap-2 mb-4">
+              <Image className="w-4 h-4" /> Upload screenshot (optional)
+            </button>
+          )}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => { setConfirmOpen(false); setConfirmScreenshot(null); }} className="lootra-btn-secondary">Cancel</button>
+            <button onClick={confirm} disabled={busy} className="lootra-btn-primary" data-testid="confirm-order-btn">Confirm — I've secured the account</button>
+          </div>
+        </Modal>
+      )}
 
       {/* Dispute modal */}
       {disputeOpen && (
@@ -289,6 +437,18 @@ export default function OrderDetail() {
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setDisputeOpen(false)} className="lootra-btn-secondary">Cancel</button>
             <button onClick={dispute} disabled={busy} className="lootra-btn-primary" data-testid="dispute-submit">Open dispute</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Complaint modal */}
+      {complaintOpen && (
+        <Modal onClose={() => setComplaintOpen(false)} title="Raise a complaint">
+          <p className="text-sm text-neutral-400 mb-3">Describe what happened after you confirmed. Admin will review the chat history and screenshots.</p>
+          <textarea className="lootra-input min-h-[120px]" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={() => setComplaintOpen(false)} className="lootra-btn-secondary">Cancel</button>
+            <button onClick={complaint} disabled={busy} className="lootra-btn-primary">Submit complaint</button>
           </div>
         </Modal>
       )}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 import { api, formatError } from "../lib/api";
 
 export default function AdminDashboard() {
@@ -11,16 +12,21 @@ export default function AdminDashboard() {
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [audit, setAudit] = useState([]);
+  const [disputed, setDisputed] = useState([]);
   const [vault, setVault] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [settleModal, setSettleModal] = useState(null);
+  const [settleNote, setSettleNote] = useState("");
+  const [settling, setSettling] = useState(false);
 
   const load = async () => {
     const safe = async (fn) => { try { return await fn(); } catch (e) { toast.error(formatError(e)); return null; } };
-    const [s, p, ac, o, u, a] = await Promise.all([
+    const [s, p, ac, o, d, u, a] = await Promise.all([
       safe(() => api.get("/admin/stats")),
       safe(() => api.get("/admin/listings", { params: { status: "pending" } })),
       safe(() => api.get("/admin/listings", { params: { status: "active" } })),
       safe(() => api.get("/admin/orders")),
+      safe(() => api.get("/admin/orders", { params: { status: "DISPUTED" } })),
       safe(() => api.get("/admin/users")),
       safe(() => api.get("/admin/audit", { params: { limit: 100 } })),
     ]);
@@ -28,6 +34,7 @@ export default function AdminDashboard() {
     if (p && Array.isArray(p.data)) setPending(p.data);
     if (ac && Array.isArray(ac.data)) setActive(ac.data);
     if (o && Array.isArray(o.data)) setOrders(o.data);
+    if (d && Array.isArray(d.data)) setDisputed(d.data);
     if (u && Array.isArray(u.data)) setUsers(u.data);
     if (a && Array.isArray(a.data)) setAudit(a.data);
   };
@@ -42,9 +49,21 @@ export default function AdminDashboard() {
     catch (e) { toast.error(formatError(e)); }
   };
 
+  const settle = async (action) => {
+    setSettling(true);
+    try {
+      await api.post(`/admin/orders/${settleModal.order.id}/settle`, { action, note: settleNote });
+      toast.success(action === "release" ? "Funds released to seller" : "Buyer refunded");
+      setSettleModal(null); setSettleNote("");
+      load();
+    } catch (e) { toast.error(formatError(e)); }
+    finally { setSettling(false); }
+  };
+
   const TABS = [
     { id: "pending", label: "Pending", count: pending.length },
     { id: "active", label: "Active listings", count: active.length },
+    { id: "disputed", label: "Disputes", count: disputed.length },
     { id: "orders", label: "All orders", count: orders.length },
     { id: "users", label: "Users", count: users.length },
     { id: "audit", label: "Audit log", count: audit.length },
@@ -67,7 +86,7 @@ export default function AdminDashboard() {
           ["Active", stats.listings_active || 0, "active"],
           ["Orders", stats.orders_total || 0, "orders"],
           ["Held", stats.orders_held || 0, "orders"],
-          ["Disputed", stats.orders_disputed || 0, "orders"],
+          ["Disputed", stats.orders_disputed || 0, "disputed"],
         ].map(([k, v, tabId]) => (
           <button key={k} onClick={() => setTab(tabId)} className="lootra-card p-4 text-left hover:border-[#CCFF00] transition-colors">
             <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">{k}</div>
@@ -121,6 +140,53 @@ export default function AdminDashboard() {
             </tr>
           ))}
         </Table>
+      )}
+
+      {tab === "disputed" && (
+        <div className="space-y-4">
+          {disputed.length === 0 ? (
+            <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-sm text-neutral-500 font-mono">
+              No disputed orders. All clear.
+            </div>
+          ) : disputed.map((o) => (
+            <div key={o.id} className="lootra-card p-5 space-y-3">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="font-mono text-xs text-neutral-500">#{o.id.slice(0, 8)}</div>
+                  <div className="font-medium mt-1">{o.listing_snapshot?.title}</div>
+                  <div className="text-xs text-neutral-400 mt-0.5">
+                    Buyer: @{o.buyer_username} · Seller: @{o.seller_username} ·{" "}
+                    <span className="text-[#CCFF00] font-mono">${o.amount.toFixed(2)}</span>
+                  </div>
+                  {o.dispute_reason && (
+                    <div className="mt-2 text-xs text-red-400 bg-red-500/5 border border-red-500/20 p-2 leading-relaxed">
+                      <span className="font-semibold">Dispute reason:</span> {o.dispute_reason}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Link to={`/orders/${o.id}`} className="lootra-btn-secondary !py-1 !px-2 text-xs inline-flex items-center gap-1">
+                    <MessageSquare className="w-3 h-3" /> View chat
+                  </Link>
+                  <button
+                    onClick={() => { setSettleModal({ order: o }); setSettleNote(""); }}
+                    className="lootra-btn-primary !py-1 !px-2 text-xs inline-flex items-center gap-1"
+                    data-testid={`settle-${o.id}`}
+                  >
+                    <Check className="w-3 h-3" /> Settle
+                  </button>
+                </div>
+              </div>
+              {o.timeline && o.timeline.length > 0 && (
+                <div className="border-t border-[#2A2A2A] pt-3 space-y-1 font-mono text-xs text-neutral-500">
+                  {o.timeline.slice(-3).map((t, i) => (
+                    <div key={i}>{new Date(t.at).toLocaleString()} — {t.note}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       {tab === "orders" && (
@@ -180,6 +246,36 @@ export default function AdminDashboard() {
       )}
 
       {preview && <ListingPreviewModal listing={preview} onClose={() => setPreview(null)} onApprove={() => { approve(preview.id); setPreview(null); }} onReject={() => { reject(preview.id); setPreview(null); }} />}
+
+      {settleModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettleModal(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-lg w-full p-6">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-1">Settle dispute</div>
+            <div className="font-medium mb-1">{settleModal.order.listing_snapshot?.title}</div>
+            <div className="text-xs text-neutral-400 mb-4 font-mono">
+              Order #{settleModal.order.id.slice(0, 8)} · ${settleModal.order.amount.toFixed(2)} · Buyer: @{settleModal.order.buyer_username} · Seller: @{settleModal.order.seller_username}
+            </div>
+            <div className="text-xs text-neutral-500 mb-2 font-mono">Optional note (added to order timeline)</div>
+            <textarea
+              className="lootra-input min-h-[80px] mb-5"
+              value={settleNote}
+              onChange={(e) => setSettleNote(e.target.value)}
+              placeholder="Note for the timeline (optional)…"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => settle("release")} disabled={settling} className="lootra-btn-primary flex-1 inline-flex items-center justify-center gap-2">
+                <Check className="w-4 h-4" /> Release to seller
+              </button>
+              <button onClick={() => settle("refund")} disabled={settling} className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-sm inline-flex items-center justify-center gap-2">
+                <X className="w-4 h-4" /> Refund buyer
+              </button>
+            </div>
+            <div className="flex justify-end mt-3">
+              <button onClick={() => setSettleModal(null)} className="lootra-btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {vault && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setVault(null)}>

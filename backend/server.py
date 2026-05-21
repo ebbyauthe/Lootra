@@ -200,7 +200,18 @@ class DisputeIn(BaseModel):
     reason: str = Field(min_length=10, max_length=1000)
 
 class MessageIn(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(default="", max_length=2000)
+    image: Optional[str] = None  # base64 data URL
+
+class ConfirmIn(BaseModel):
+    screenshot: Optional[str] = None  # base64 data URL
+
+class ComplaintIn(BaseModel):
+    reason: str = Field(min_length=10, max_length=1000)
+
+class SettleIn(BaseModel):
+    action: Literal["release", "refund"]
+    note: str = Field(default="", max_length=500)
 
 class RateIn(BaseModel):
     score: int = Field(ge=1, le=5)
@@ -276,6 +287,34 @@ async def startup():
     ]:
         if not await db.games.find_one({"id": g["id"]}):
             await db.games.insert_one(g)
+    import asyncio as _asyncio
+    _asyncio.create_task(_order_scheduler())
+
+async def _order_scheduler():
+    import asyncio as _asyncio
+    while True:
+        try:
+            now = now_utc()
+            # Auto-dispute: orders past handover deadline still in PAID or DELIVERED
+            async for o in db.orders.find({"status": {"$in": ["PAID", "DELIVERED"]}, "handover_deadline": {"$lt": now.isoformat()}}):
+                timeline = o.get("timeline", [])
+                timeline.append({"status": "DISPUTED", "at": now.isoformat(), "note": "Handover deadline exceeded — dispute auto-triggered."})
+                await db.orders.update_one({"id": o["id"]}, {"$set": {
+                    "status": "DISPUTED", "timeline": timeline, "updated_at": now.isoformat(),
+                }})
+                log.info(f"Auto-disputed order {o['id']}")
+            # Auto-release: CONFIRMED orders past complaint window
+            async for o in db.orders.find({"status": "CONFIRMED", "complaint_window_until": {"$lt": now.isoformat()}}):
+                timeline = o.get("timeline", [])
+                timeline.append({"status": "RELEASED", "at": now.isoformat(), "note": "Complaint window closed — funds automatically released to seller."})
+                await db.orders.update_one({"id": o["id"]}, {"$set": {
+                    "status": "RELEASED", "timeline": timeline, "updated_at": now.isoformat(),
+                }})
+                await db.users.update_one({"id": o["seller_id"]}, {"$inc": {"balance": o["amount"], "sales_count": 1, "trust_score": 2}})
+                log.info(f"Auto-released order {o['id']}")
+        except Exception as e:
+            log.error(f"Scheduler error: {e}")
+        await _asyncio.sleep(60)
 
 # ---------------- Auth ----------------
 @api.post("/auth/register")
@@ -611,6 +650,7 @@ async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
     # Debit buyer, hold in escrow
     await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -listing["price"]}})
     await db.listings.update_one({"id": listing_id}, {"$set": {"status": "sold", "updated_at": now_utc().isoformat()}})
+    deadline = now_utc() + timedelta(minutes=65)
     order = {
         "id": oid,
         "listing_id": listing_id,
@@ -620,14 +660,36 @@ async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
         "seller_id": listing["seller_id"],
         "seller_username": listing["seller_username"],
         "amount": listing["price"],
-        "status": "PAID",  # PAID -> DELIVERED -> CONFIRMED -> RELEASED ; or DISPUTED -> REFUNDED
+        "status": "PAID",
         "credentials_released": False,
+        "handover_deadline": deadline.isoformat(),
+        "complaint_window_until": None,
         "created_at": now_utc().isoformat(),
         "updated_at": now_utc().isoformat(),
-        "timeline": [{"status": "PAID", "at": now_utc().isoformat(), "note": "Funds held in escrow."}],
+        "timeline": [{"status": "PAID", "at": now_utc().isoformat(), "note": "Funds held in escrow. Seller must assist with credential handover within 65 minutes."}],
     }
     await db.orders.insert_one(order)
     await audit("order.purchase", user["id"], oid, {"amount": listing["price"]})
+    # Notify admin
+    seller = await db.users.find_one({"id": listing["seller_id"]}, {"_id": 0})
+    try:
+        await send_email(
+            ADMIN_EMAIL,
+            f"New purchase — order {oid[:8]}",
+            _email_html("New purchase requires handover", f"""
+  <p style="color:#999;font-size:13px;margin:0 0 16px">A buyer has purchased an account. You must oversee the 65-minute credential handover.</p>
+  <table style="width:100%;font-size:12px;color:#ccc;font-family:monospace">
+    <tr><td style="color:#555;padding:4px 0">Order</td><td>{oid[:8]}</td></tr>
+    <tr><td style="color:#555;padding:4px 0">Listing</td><td>{listing['title']}</td></tr>
+    <tr><td style="color:#555;padding:4px 0">Buyer</td><td>@{user['username']}</td></tr>
+    <tr><td style="color:#555;padding:4px 0">Seller</td><td>@{listing['seller_username']}</td></tr>
+    <tr><td style="color:#555;padding:4px 0">Amount</td><td>${listing['price']:.2f}</td></tr>
+    <tr><td style="color:#555;padding:4px 0">Deadline</td><td>{deadline.strftime('%Y-%m-%d %H:%M UTC')}</td></tr>
+  </table>
+  <a href="{FRONTEND_URL}/admin" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600;margin-top:20px">Go to admin dashboard</a>""")
+        )
+    except Exception:
+        pass
     order.pop("_id", None)
     return order
 
@@ -676,21 +738,24 @@ async def buyer_reveal(order_id: str, user: dict = Depends(get_current_user)):
     return {"credentials": creds, "status": new_status}
 
 @api.post("/orders/{order_id}/confirm")
-async def confirm_order(order_id: str, user: dict = Depends(get_current_user)):
+async def confirm_order(order_id: str, body: ConfirmIn = ConfirmIn(), user: dict = Depends(get_current_user)):
     o = await db.orders.find_one({"id": order_id})
     if not o or o["buyer_id"] != user["id"]:
         raise HTTPException(403, "Forbidden")
-    if o["status"] != "DELIVERED":
+    if o["status"] not in ("PAID", "DELIVERED"):
         raise HTTPException(400, "Order not ready to confirm")
+    complaint_until = now_utc() + timedelta(hours=24)
     timeline = o.get("timeline", [])
-    timeline.append({"status": "CONFIRMED", "at": now_utc().isoformat(), "note": "Buyer confirmed access."})
-    timeline.append({"status": "RELEASED", "at": now_utc().isoformat(), "note": "Funds released to seller."})
+    timeline.append({"status": "CONFIRMED", "at": now_utc().isoformat(), "note": "Buyer confirmed account access secured."})
     await db.orders.update_one({"id": order_id}, {"$set": {
-        "status": "RELEASED", "timeline": timeline, "updated_at": now_utc().isoformat(),
+        "status": "CONFIRMED",
+        "confirm_screenshot": body.screenshot,
+        "complaint_window_until": complaint_until.isoformat(),
+        "timeline": timeline,
+        "updated_at": now_utc().isoformat(),
     }})
-    await db.users.update_one({"id": o["seller_id"]}, {"$inc": {"balance": o["amount"], "sales_count": 1, "trust_score": 2}})
-    await audit("order.released", user["id"], order_id, {"amount": o["amount"]})
-    return {"ok": True}
+    await audit("order.confirmed", user["id"], order_id)
+    return {"ok": True, "complaint_window_until": complaint_until.isoformat()}
 
 @api.post("/orders/{order_id}/dispute")
 async def dispute_order(order_id: str, body: DisputeIn, user: dict = Depends(get_current_user)):
@@ -705,6 +770,49 @@ async def dispute_order(order_id: str, body: DisputeIn, user: dict = Depends(get
         "status": "DISPUTED", "dispute_reason": body.reason, "timeline": timeline, "updated_at": now_utc().isoformat(),
     }})
     await audit("order.disputed", user["id"], order_id)
+    return {"ok": True}
+
+@api.post("/orders/{order_id}/complaint")
+async def complaint_order(order_id: str, body: ComplaintIn, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o or o["buyer_id"] != user["id"]:
+        raise HTTPException(403, "Only buyer can raise a complaint")
+    if o["status"] != "CONFIRMED":
+        raise HTTPException(400, "Can only complain on confirmed orders")
+    window = o.get("complaint_window_until")
+    if window and datetime.fromisoformat(window) < now_utc():
+        raise HTTPException(400, "Complaint window has closed")
+    timeline = o.get("timeline", [])
+    timeline.append({"status": "DISPUTED", "at": now_utc().isoformat(), "note": f"Buyer raised post-confirmation complaint: {body.reason}"})
+    await db.orders.update_one({"id": order_id}, {"$set": {
+        "status": "DISPUTED", "dispute_reason": body.reason, "timeline": timeline, "updated_at": now_utc().isoformat(),
+    }})
+    await audit("order.complaint", user["id"], order_id)
+    return {"ok": True}
+
+@api.post("/admin/orders/{order_id}/settle")
+async def admin_settle(order_id: str, body: SettleIn, admin: dict = Depends(require_admin)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o["status"] not in ("DISPUTED", "CONFIRMED"):
+        raise HTTPException(400, "Order is not in a settleable state")
+    timeline = o.get("timeline", [])
+    note = body.note or ("Admin released funds to seller." if body.action == "release" else "Admin refunded buyer.")
+    if body.action == "release":
+        timeline.append({"status": "RELEASED", "at": now_utc().isoformat(), "note": note})
+        await db.orders.update_one({"id": order_id}, {"$set": {
+            "status": "RELEASED", "timeline": timeline, "updated_at": now_utc().isoformat(),
+        }})
+        await db.users.update_one({"id": o["seller_id"]}, {"$inc": {"balance": o["amount"], "sales_count": 1, "trust_score": 2}})
+        await audit("order.admin_release", admin["id"], order_id, {"amount": o["amount"]})
+    else:
+        timeline.append({"status": "REFUNDED", "at": now_utc().isoformat(), "note": note})
+        await db.orders.update_one({"id": order_id}, {"$set": {
+            "status": "REFUNDED", "timeline": timeline, "updated_at": now_utc().isoformat(),
+        }})
+        await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": o["amount"]}})
+        await audit("order.admin_refund", admin["id"], order_id, {"amount": o["amount"]})
     return {"ok": True}
 
 @api.post("/orders/{order_id}/review")
@@ -747,6 +855,8 @@ async def send_message(order_id: str, body: MessageIn, user: dict = Depends(get_
         raise HTTPException(404, "Order not found")
     if user["id"] not in (o["buyer_id"], o["seller_id"]) and user.get("role") != "admin":
         raise HTTPException(403, "Forbidden")
+    if not body.content and not body.image:
+        raise HTTPException(400, "Message must have text or image")
     msg = {
         "id": str(uuid.uuid4()),
         "order_id": order_id,
@@ -754,6 +864,7 @@ async def send_message(order_id: str, body: MessageIn, user: dict = Depends(get_
         "sender_username": user["username"],
         "is_admin": user.get("role") == "admin",
         "content": body.content,
+        "image": body.image,
         "created_at": now_utc().isoformat(),
     }
     await db.messages.insert_one(msg)
