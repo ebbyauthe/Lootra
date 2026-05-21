@@ -372,8 +372,12 @@ async def _order_scheduler():
                     "status": "DISPUTED", "timeline": timeline, "updated_at": now.isoformat(),
                 }})
                 log.info(f"Auto-disputed order {o['id']}")
-            # Auto-release: CONFIRMED orders past complaint window
-            async for o in db.orders.find({"status": "CONFIRMED", "complaint_window_until": {"$lt": now.isoformat()}}):
+            # Auto-release: CONFIRMED orders past complaint window OR with no window set (legacy)
+            async for o in db.orders.find({"status": "CONFIRMED", "$or": [
+                {"complaint_window_until": {"$lt": now.isoformat()}},
+                {"complaint_window_until": None},
+                {"complaint_window_until": {"$exists": False}},
+            ]}):
                 timeline = o.get("timeline", [])
                 timeline.append({"status": "RELEASED", "at": now.isoformat(), "note": "Complaint window closed — funds automatically released to seller."})
                 await db.orders.update_one({"id": o["id"]}, {"$set": {

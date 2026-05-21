@@ -242,7 +242,7 @@ export default function AdminDashboard() {
                 {["PAID","DELIVERED","DISPUTED"].includes(o.status) && (
                   <button onClick={() => refund(o.id)} className="lootra-btn-secondary !py-1 !px-2 text-xs" data-testid={`refund-${o.id}`}>Refund buyer</button>
                 )}
-                {o.status === "DISPUTED" && (
+                {["DISPUTED", "CONFIRMED"].includes(o.status) && (
                   <button onClick={() => { setSettleModal({ order: o }); setSettleNote(""); }} className="lootra-btn-primary !py-1 !px-2 text-xs">
                     Settle
                   </button>
