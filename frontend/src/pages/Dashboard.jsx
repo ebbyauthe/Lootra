@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Wallet, ShoppingBag, Tag, Heart, ArrowDownToLine, X, ChevronDown, Search } from "lucide-react";
+import { Plus, Wallet, ShoppingBag, Tag, Heart, ArrowDownToLine, X, ChevronDown, Search, TrendingUp, TrendingDown } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
@@ -270,6 +270,7 @@ export default function Dashboard() {
   const [watch, setWatch] = useState([]);
   const [walletBalance, setWalletBalance] = useState(null);
   const [showWithdraw, setShowWithdraw] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const loadWallet = async () => {
     try {
@@ -291,6 +292,7 @@ export default function Dashboard() {
   useEffect(() => {
     load().catch(() => {});
     loadWallet();
+    api.get("/wallet/history").then(r => setHistory(r.data)).catch(() => {});
   }, []);
 
   const TABS = [
@@ -298,6 +300,7 @@ export default function Dashboard() {
     { id: "sales", label: "Sales", count: sales.length },
     { id: "listings", label: "My Listings", count: listings.length },
     { id: "watchlist", label: "Watchlist", count: watch.length },
+    { id: "wallet", label: "Wallet History", count: history.length },
   ];
 
   const heldSub = () => {
@@ -368,6 +371,7 @@ export default function Dashboard() {
       {tab === "sales" && <OrdersTable orders={sales} type="seller" />}
       {tab === "listings" && <ListingsTable listings={listings} reload={load} />}
       {tab === "watchlist" && <WatchGrid items={watch} />}
+      {tab === "wallet" && <WalletHistory items={history} />}
 
       {showWithdraw && (
         <WithdrawModal
@@ -437,6 +441,55 @@ function ListingsTable({ listings, reload }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+const TYPE_CONFIG = {
+  topup:      { label: "Top-up",     color: "text-[#CCFF00]", bg: "bg-[#CCFF00]/10",  Icon: TrendingUp },
+  earning:    { label: "Earning",    color: "text-blue-400",  bg: "bg-blue-400/10",   Icon: TrendingUp },
+  withdrawal: { label: "Withdrawal", color: "text-[#FF453A]", bg: "bg-[#FF453A]/10",  Icon: TrendingDown },
+};
+
+const STATUS_BADGE = {
+  completed: "text-[#CCFF00]",
+  approved:  "text-[#CCFF00]",
+  pending:   "text-[#FFB020]",
+  rejected:  "text-[#FF453A]",
+};
+
+function WalletHistory({ items }) {
+  if (items.length === 0)
+    return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No wallet activity yet.</div>;
+  return (
+    <div className="space-y-3">
+      {items.map((item, i) => {
+        const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.topup;
+        const positive = item.amount >= 0;
+        return (
+          <div key={i} className="lootra-card p-4 flex items-center gap-4">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
+              <cfg.Icon className={`w-4 h-4 ${cfg.color}`} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium truncate">{item.note}</div>
+              <div className="text-[10px] font-mono text-neutral-500 mt-0.5 flex gap-2 flex-wrap">
+                <span className={`uppercase tracking-wider ${cfg.color}`}>{cfg.label}</span>
+                {item.reference && <span>#{item.reference.slice(0, 8)}</span>}
+                {item.created_at && <span>{new Date(item.created_at).toLocaleDateString()}</span>}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className={`font-mono text-sm font-bold ${positive ? "text-[#CCFF00]" : "text-[#FF453A]"}`}>
+                {positive ? "+" : ""}${Math.abs(item.amount).toFixed(2)}
+              </div>
+              <div className={`text-[10px] font-mono mt-0.5 ${STATUS_BADGE[item.status] || "text-neutral-400"}`}>
+                {item.status?.toUpperCase()}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

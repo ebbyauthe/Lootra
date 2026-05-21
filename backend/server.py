@@ -1232,6 +1232,37 @@ async def request_withdrawal(body: WithdrawIn, user: dict = Depends(get_current_
 async def my_withdrawals(user: dict = Depends(get_current_user)):
     return await db.withdrawals.find({"user_id": user["id"]}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
 
+@api.get("/wallet/history")
+async def wallet_history(user: dict = Depends(get_current_user)):
+    uid = user["id"]
+    rows = []
+    # Fiat top-ups
+    async for t in db.pending_topups.find({"user_id": uid, "credited": True}, {"_id": 0}):
+        rows.append({"type": "topup", "method": "fiat", "amount": t.get("usd_amount", 0),
+                     "currency": t.get("currency", "USD"), "status": "completed",
+                     "reference": t.get("tx_ref", ""), "created_at": t.get("created_at", ""),
+                     "note": f"Top-up via card/bank ({t.get('currency','USD')} {t.get('amount','')})"})
+    # Crypto top-ups
+    async for t in db.crypto_topups.find({"user_id": uid, "credited": True}, {"_id": 0}):
+        rows.append({"type": "topup", "method": "crypto", "amount": t.get("amount_usd", 0),
+                     "currency": "USD", "status": "completed",
+                     "reference": t.get("payment_id", ""), "created_at": t.get("created_at", ""),
+                     "note": f"Top-up via crypto (${t.get('amount_usd',0):.2f})"})
+    # Earnings from sales
+    async for c in db.wallet_credits.find({"user_id": uid}, {"_id": 0}):
+        rows.append({"type": "earning", "method": "sale", "amount": c.get("amount", 0),
+                     "currency": "USD", "status": "completed",
+                     "reference": c.get("order_id", ""), "created_at": c.get("created_at", ""),
+                     "note": "Earnings from sale"})
+    # Withdrawals
+    async for w in db.withdrawals.find({"user_id": uid}, {"_id": 0}):
+        rows.append({"type": "withdrawal", "method": "bank", "amount": -w.get("amount_usd", 0),
+                     "currency": "USD", "status": w.get("status", "pending"),
+                     "reference": w.get("id", ""), "created_at": w.get("created_at", ""),
+                     "note": f"Withdrawal to {w.get('bank_name','')} ({w.get('account_number','')})"})
+    rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return rows
+
 @api.post("/admin/withdrawals/{wid}/approve")
 async def admin_approve_withdrawal(wid: str, admin: dict = Depends(require_admin)):
     w = await db.withdrawals.find_one({"id": wid})
