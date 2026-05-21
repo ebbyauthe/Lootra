@@ -299,7 +299,12 @@ export default function AdminDashboard() {
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-xs text-neutral-500">#{w.id.slice(0,8)}</span>
-                    <span className={`lootra-badge text-[9px] ${w.status === "pending" ? "text-[#FFB020]" : w.status === "approved" ? "text-[#CCFF00]" : "text-[#FF453A]"}`}>{w.status.toUpperCase()}</span>
+                    <span className={`lootra-badge text-[9px] ${
+                      w.status === "pending" ? "text-[#FFB020]" :
+                      w.status === "processing" ? "text-blue-400" :
+                      w.status === "completed" ? "text-[#CCFF00]" :
+                      "text-[#FF453A]"
+                    }`}>{w.status === "processing" ? "PROCESSING" : w.status === "completed" ? "COMPLETED" : w.status.toUpperCase()}</span>
                   </div>
                   <div className="font-medium mt-1">@{w.username || w.user_id?.slice(0,8)}</div>
                   <div className="text-xs text-neutral-400 font-mono mt-0.5">

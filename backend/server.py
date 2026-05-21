@@ -1273,21 +1273,30 @@ async def admin_approve_withdrawal(wid: str, admin: dict = Depends(require_admin
     if not FLW_SECRET_KEY:
         raise HTTPException(503, "Payment service not configured")
     ref = f"lootra-{wid[:8]}-{int(now_utc().timestamp())}"
-    async with httpx.AsyncClient(timeout=30) as cl:
-        r = await cl.post(
-            "https://api.flutterwave.com/v3/transfers",
-            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}", "Content-Type": "application/json"},
-            json={
-                "account_bank": w["bank_code"], "account_number": w["account_number"],
-                "amount": w["payout_ngn"], "narration": f"Lootra withdrawal #{wid[:8]}",
-                "currency": "NGN", "reference": ref,
-            },
-        )
-    data = r.json()
+    try:
+        async with httpx.AsyncClient(timeout=30) as cl:
+            r = await cl.post(
+                "https://api.flutterwave.com/v3/transfers",
+                headers={"Authorization": f"Bearer {FLW_SECRET_KEY}", "Content-Type": "application/json"},
+                json={
+                    "account_bank": w["bank_code"], "account_number": w["account_number"],
+                    "amount": w["payout_ngn"], "narration": f"Lootra withdrawal #{wid[:8]}",
+                    "currency": "NGN", "reference": ref,
+                },
+            )
+        data = r.json()
+    except Exception as e:
+        log.error(f"FLW transfer error: {e}")
+        raise HTTPException(502, "Could not reach payment service")
     if data.get("status") != "success":
-        raise HTTPException(502, f"Transfer failed: {data.get('message', 'Unknown error')}")
+        flw_msg = data.get("message", "Unknown error")
+        await db.withdrawals.update_one({"id": wid}, {"$set": {
+            "status": "failed", "fail_reason": flw_msg,
+            "flw_reference": ref, "updated_at": now_utc().isoformat(),
+        }})
+        raise HTTPException(502, f"Transfer failed: {flw_msg}")
     await db.withdrawals.update_one({"id": wid}, {"$set": {
-        "status": "approved", "flw_reference": ref, "flw_transfer_id": data.get("data", {}).get("id"),
+        "status": "processing", "flw_reference": ref, "flw_transfer_id": data.get("data", {}).get("id"),
         "approved_by": admin["id"], "approved_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
     }})
     await audit("wallet.withdrawal_approved", admin["id"], wid, {"payout_ngn": w["payout_ngn"]})
@@ -1477,6 +1486,20 @@ async def flutterwave_webhook(request: Request):
                 await db.users.update_one({"id": pending["user_id"]}, {"$inc": {"balance": pending["usd_amount"]}})
                 await db.pending_topups.update_one({"tx_ref": tx_ref}, {"$set": {"credited": True}})
                 await audit("wallet.fiat_topup_webhook", pending["user_id"], tx_ref, {"usd_amount": pending["usd_amount"]})
+    if body.get("event") in ("transfer.completed", "transfer.failed"):
+        tx = body.get("data", {})
+        ref = tx.get("reference", "")
+        w = await db.withdrawals.find_one({"flw_reference": ref})
+        if w:
+            new_status = "completed" if body.get("event") == "transfer.completed" else "failed"
+            update = {"status": new_status, "updated_at": now_utc().isoformat()}
+            if new_status == "failed":
+                update["fail_reason"] = tx.get("complete_message", "Transfer failed")
+                # refund user balance
+                await db.users.update_one({"id": w["user_id"]}, {"$inc": {"balance": w["amount_usd"]}})
+                await db.wallet_credits.update_many({"order_id": {"$in": w.get("credit_ids", [])}, "withdrawn": True}, {"$set": {"withdrawn": False}})
+            await db.withdrawals.update_one({"flw_reference": ref}, {"$set": update})
+            await audit(f"wallet.withdrawal_{new_status}", w["user_id"], w["id"], {})
     return {"status": "ok"}
 
 @app.post("/api/webhooks/nowpayments")

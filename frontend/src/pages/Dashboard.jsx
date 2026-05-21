@@ -452,10 +452,21 @@ const TYPE_CONFIG = {
 };
 
 const STATUS_BADGE = {
-  completed: "text-[#CCFF00]",
-  approved:  "text-[#CCFF00]",
-  pending:   "text-[#FFB020]",
-  rejected:  "text-[#FF453A]",
+  completed:  "text-[#CCFF00]",
+  approved:   "text-[#CCFF00]",
+  processing: "text-blue-400",
+  pending:    "text-[#FFB020]",
+  rejected:   "text-[#FF453A]",
+  failed:     "text-[#FF453A]",
+};
+
+const STATUS_LABEL = {
+  completed:  "Completed",
+  approved:   "Completed",
+  processing: "Processing",
+  pending:    "Pending",
+  rejected:   "Rejected",
+  failed:     "Failed",
 };
 
 function WalletHistory({ items }) {
@@ -484,7 +495,7 @@ function WalletHistory({ items }) {
                 {positive ? "+" : ""}${Math.abs(item.amount).toFixed(2)}
               </div>
               <div className={`text-[10px] font-mono mt-0.5 ${STATUS_BADGE[item.status] || "text-neutral-400"}`}>
-                {item.status?.toUpperCase()}
+                {STATUS_LABEL[item.status] || item.status?.toUpperCase()}
               </div>
             </div>
           </div>
