@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Check, X, RefreshCw, Eye, Ban } from "lucide-react";
+import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, formatError } from "../lib/api";
 
 export default function AdminDashboard() {
@@ -12,6 +12,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [audit, setAudit] = useState([]);
   const [vault, setVault] = useState(null);
+  const [preview, setPreview] = useState(null);
 
   const load = async () => {
     const safe = async (fn) => { try { return await fn(); } catch (e) { toast.error(formatError(e)); return null; } };
@@ -95,6 +96,7 @@ export default function AdminDashboard() {
               <td className="px-4 py-3 font-mono text-[#CCFF00]">${l.price.toFixed(2)}</td>
               <td className="px-4 py-3 font-mono text-xs text-neutral-500">{new Date(l.created_at).toLocaleDateString()}</td>
               <td className="px-4 py-3 text-right space-x-2">
+                <button onClick={() => setPreview(l)} className="lootra-btn-secondary !py-1 !px-2 inline-flex items-center gap-1 text-xs"><Eye className="w-3 h-3" /> Preview</button>
                 <button onClick={() => peekVault(l.id)} className="lootra-btn-secondary !py-1 !px-2 inline-flex items-center gap-1 text-xs" data-testid={`vault-${l.id}`}><Eye className="w-3 h-3" /> Vault</button>
                 <button onClick={() => approve(l.id)} className="lootra-btn-primary !py-1 !px-2 inline-flex items-center gap-1 text-xs" data-testid={`approve-${l.id}`}><Check className="w-3 h-3" /> Approve</button>
                 <button onClick={() => reject(l.id)} className="lootra-btn-secondary !py-1 !px-2 inline-flex items-center gap-1 text-xs !border-[#FF453A] !text-[#FF453A]" data-testid={`reject-${l.id}`}><X className="w-3 h-3" /> Reject</button>
@@ -177,6 +179,8 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {preview && <ListingPreviewModal listing={preview} onClose={() => setPreview(null)} onApprove={() => { approve(preview.id); setPreview(null); }} onReject={() => { reject(preview.id); setPreview(null); }} />}
+
       {vault && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setVault(null)}>
           <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-lg w-full p-6">
@@ -188,6 +192,93 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ListingPreviewModal({ listing, onClose, onApprove, onReject }) {
+  const [imgIdx, setImgIdx] = useState(0);
+  const screenshots = listing.screenshots || [];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-[#2A2A2A]">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-1">Pending review</div>
+            <div className="font-medium text-white">{listing.title}</div>
+            <div className="text-xs text-neutral-400 mt-0.5">{listing.game} · @{listing.seller_username} · <span className="text-[#CCFF00] font-mono">${listing.price?.toFixed(2)}</span></div>
+          </div>
+          <button onClick={onClose} className="text-neutral-500 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Screenshots */}
+          {screenshots.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-2">Screenshots ({screenshots.length})</div>
+              <div className="relative bg-[#0A0A0A] border border-[#2A2A2A]">
+                <img src={screenshots[imgIdx]} alt="" className="w-full aspect-video object-contain" />
+                {screenshots.length > 1 && (
+                  <div className="absolute inset-y-0 flex items-center justify-between w-full px-2 pointer-events-none">
+                    <button onClick={() => setImgIdx(i => Math.max(0, i - 1))} className="pointer-events-auto bg-black/60 p-1 hover:bg-black/80 transition-colors disabled:opacity-30" disabled={imgIdx === 0}>
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setImgIdx(i => Math.min(screenshots.length - 1, i + 1))} className="pointer-events-auto bg-black/60 p-1 hover:bg-black/80 transition-colors disabled:opacity-30" disabled={imgIdx === screenshots.length - 1}>
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {screenshots.length > 1 && (
+                <div className="flex gap-1.5 mt-2 overflow-x-auto no-scrollbar">
+                  {screenshots.map((s, i) => (
+                    <button key={i} onClick={() => setImgIdx(i)} className={`shrink-0 w-20 aspect-video border ${i === imgIdx ? "border-[#CCFF00]" : "border-[#2A2A2A]"}`}>
+                      <img src={s} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Details */}
+          <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+            {[
+              ["Game", listing.game],
+              ["Platform", listing.platform],
+              ["Price", `$${listing.price?.toFixed(2)}`],
+              ["Seller", `@${listing.seller_username}`],
+              ["Submitted", new Date(listing.created_at).toLocaleString()],
+              ["Region", listing.region || "—"],
+            ].map(([k, v]) => (
+              <div key={k} className="bg-[#0A0A0A] border border-[#2A2A2A] p-3">
+                <div className="text-neutral-500 text-[10px] uppercase tracking-wider mb-1">{k}</div>
+                <div className="text-white">{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Description */}
+          {listing.description && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-2">Description</div>
+              <div className="bg-[#0A0A0A] border border-[#2A2A2A] p-3 text-sm text-neutral-300 whitespace-pre-wrap leading-relaxed">{listing.description}</div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-2">
+            <button onClick={onApprove} className="lootra-btn-primary flex-1 inline-flex items-center justify-center gap-2">
+              <Check className="w-4 h-4" /> Approve
+            </button>
+            <button onClick={onReject} className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-sm inline-flex items-center justify-center gap-2">
+              <X className="w-4 h-4" /> Reject
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
