@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { useBlocker } from "react-router-dom";
 import { toast } from "sonner";
 import { CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle, RefreshCw, X } from "lucide-react";
 import { api, formatError } from "../lib/api";
@@ -218,13 +217,7 @@ function CryptoTab() {
 
   const isPendingPayment = !!payment && !credited && status !== "failed" && status !== "expired";
 
-  // Block in-app navigation while payment is pending
-  const blocker = useBlocker(useCallback(() => isPendingPayment, [isPendingPayment]));
-  useEffect(() => {
-    if (blocker.state === "blocked") setShowCancelDialog(true);
-  }, [blocker.state]);
-
-  // Block browser tab close / refresh while payment is pending
+  // Warn before tab close / refresh while payment is pending
   useEffect(() => {
     if (!isPendingPayment) return;
     const handler = (e) => { e.preventDefault(); e.returnValue = ""; };
@@ -289,12 +282,10 @@ function CryptoTab() {
   const cancelPayment = () => {
     setPayment(null);
     setShowCancelDialog(false);
-    if (blocker.state === "blocked") blocker.proceed?.();
   };
 
   const dismissCancel = () => {
     setShowCancelDialog(false);
-    if (blocker.state === "blocked") blocker.reset?.();
   };
 
   const coin = CRYPTO_OPTIONS.find((c) => c.code === payCurrency);
