@@ -10,10 +10,6 @@ import logging
 import secrets
 import hashlib
 import hmac as _hmac
-import smtplib
-import asyncio
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
@@ -42,11 +38,8 @@ FLW_WEBHOOK_HASH = os.environ.get("FLW_WEBHOOK_HASH", "")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "Lootra <noreply@lootra.org>")
 
 SUPPORTED_CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS"]
 FALLBACK_RATES = {"USD": 1.0, "CAD": 1.37, "GBP": 0.79, "EUR": 0.92, "NGN": 1550.0, "GHS": 15.5}
@@ -358,24 +351,17 @@ def _email_html(title: str, body_html: str) -> str:
 </div>"""
 
 async def send_email(to: str, subject: str, html: str):
-    if not SMTP_USER or not SMTP_PASS:
-        raise HTTPException(503, "Email service not configured — add SMTP_USER and SMTP_PASS to environment")
-    def _send():
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM or SMTP_USER
-        msg["To"] = to
-        msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-            s.ehlo()
-            s.starttls()
-            s.login(SMTP_USER, SMTP_PASS)
-            s.sendmail(msg["From"], [to], msg.as_string())
-    try:
-        await asyncio.get_event_loop().run_in_executor(None, _send)
-    except Exception as e:
-        log.error(f"Email send failed: {e}")
-        raise HTTPException(502, "Failed to send email — check SMTP credentials")
+    if not RESEND_API_KEY:
+        raise HTTPException(503, "Email service not configured — add RESEND_API_KEY to environment")
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={"from": EMAIL_FROM, "to": [to], "subject": subject, "html": html},
+        )
+    if r.status_code >= 400:
+        log.error(f"Resend error: {r.text}")
+        raise HTTPException(502, "Failed to send email")
 
 async def send_verification_email(to_email: str, token: str):
     url = f"{FRONTEND_URL}/verify-email?token={token}"
