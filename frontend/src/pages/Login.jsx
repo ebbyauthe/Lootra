@@ -38,8 +38,9 @@ export default function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
-      <div className="text-sm text-neutral-500 mt-6">
-        New to Lootra? <Link to="/register" className="text-[#CCFF00] hover:underline">Create an account</Link>
+      <div className="flex items-center justify-between text-sm mt-6">
+        <span className="text-neutral-500">New to Lootra? <Link to="/register" className="text-[#CCFF00] hover:underline">Create an account</Link></span>
+        <Link to="/forgot-password" className="text-neutral-500 hover:text-white transition-colors">Forgot password?</Link>
       </div>
     </div>
   );

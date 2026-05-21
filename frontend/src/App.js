@@ -18,6 +18,8 @@ import AdminDashboard from "./pages/AdminDashboard";
 import ProfilePage from "./pages/ProfilePage";
 import TopUp from "./pages/TopUp";
 import TopUpCallback from "./pages/TopUpCallback";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 export default function App() {
   return (
@@ -31,6 +33,8 @@ export default function App() {
               <Route path="/listing/:id" element={<ListingDetail />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/dashboard" element={<ProtectedRoute noAdmin><Dashboard /></ProtectedRoute>} />
               <Route path="/sell" element={<ProtectedRoute noAdmin><CreateListing /></ProtectedRoute>} />
               <Route path="/order/:id" element={<ProtectedRoute><OrderDetail /></ProtectedRoute>} />

@@ -34,6 +34,8 @@ FLW_WEBHOOK_HASH = os.environ.get("FLW_WEBHOOK_HASH", "")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@lootra.com")
 SUPPORTED_CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS"]
 FALLBACK_RATES = {"USD": 1.0, "CAD": 1.37, "GBP": 0.79, "EUR": 0.92, "NGN": 1550.0, "GHS": 15.5}
 _rates_cache: dict = {"rates": dict(FALLBACK_RATES), "updated_at": None}
@@ -338,6 +340,61 @@ async def login(data: LoginIn, request: Request, response: Response):
     refresh = make_refresh_token(user["id"])
     set_auth_cookies(response, access, refresh)
     return {"user": sanitize_user(user), "token": access}
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    password: str = Field(min_length=8)
+
+async def send_reset_email(to_email: str, token: str):
+    if not RESEND_API_KEY:
+        raise HTTPException(503, "Email service not configured")
+    reset_url = f"{FRONTEND_URL}/reset-password?token={token}"
+    html = f"""
+    <div style="font-family:monospace;max-width:480px;margin:0 auto;padding:32px;background:#0A0A0A;color:#fff;border:1px solid #2A2A2A">
+      <div style="color:#CCFF00;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">LOOTRA</div>
+      <h2 style="font-size:20px;font-weight:500;margin:0 0 12px">Reset your password</h2>
+      <p style="color:#999;font-size:13px;margin:0 0 24px">Click the button below to set a new password. This link expires in 1 hour.</p>
+      <a href="{reset_url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600">Reset password</a>
+      <p style="color:#555;font-size:11px;margin:24px 0 0">If you didn't request this, ignore this email. Your password won't change.</p>
+    </div>
+    """
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json={"from": EMAIL_FROM, "to": [to_email], "subject": "Reset your Lootra password", "html": html},
+        )
+    if r.status_code >= 400:
+        raise HTTPException(502, "Failed to send reset email")
+
+@api.post("/auth/forgot-password")
+async def forgot_password(data: ForgotPasswordIn):
+    user = await db.users.find_one({"email": data.email.lower()})
+    if not user:
+        return {"ok": True}
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    await db.password_resets.delete_many({"user_id": user["id"]})
+    await db.password_resets.insert_one({"user_id": user["id"], "token": token, "expires_at": expires})
+    await send_reset_email(user["email"], token)
+    return {"ok": True}
+
+@api.post("/auth/reset-password")
+async def reset_password(data: ResetPasswordIn):
+    rec = await db.password_resets.find_one({"token": data.token})
+    if not rec:
+        raise HTTPException(400, "Invalid or expired reset link")
+    if rec["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        await db.password_resets.delete_one({"token": data.token})
+        raise HTTPException(400, "Reset link has expired")
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password": hashed}})
+    await db.password_resets.delete_one({"token": data.token})
+    await audit("auth.password_reset", rec["user_id"], "user", {})
+    return {"ok": True}
 
 @api.post("/auth/logout")
 async def logout(response: Response):
