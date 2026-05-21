@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Wallet, CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle } from "lucide-react";
 import { api, formatError } from "../lib/api";
