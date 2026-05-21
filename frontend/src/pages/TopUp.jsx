@@ -114,12 +114,55 @@ function FiatTab({ onRefresh }) {
   );
 }
 
+const STATUS_LABEL = {
+  waiting:       { text: "Waiting for payment",     color: "text-[#FFB020]" },
+  confirming:    { text: "Confirming on-chain…",    color: "text-blue-400" },
+  confirmed:     { text: "Confirmed",               color: "text-[#CCFF00]" },
+  sending:       { text: "Processing…",             color: "text-[#CCFF00]" },
+  partially_paid:{ text: "Partially paid",          color: "text-[#FFB020]" },
+  finished:      { text: "Credited to wallet ✓",   color: "text-[#CCFF00]" },
+  failed:        { text: "Payment failed",          color: "text-[#FF453A]" },
+  expired:       { text: "Payment expired",         color: "text-[#FF453A]" },
+};
+
+function useCountdown(expiresAt) {
+  const [secs, setSecs] = useState(null);
+  useEffect(() => {
+    if (!expiresAt) return;
+    const tick = () => setSecs(Math.max(0, Math.floor((new Date(expiresAt) - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+  if (secs === null) return null;
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 function CryptoTab() {
+  const { refresh } = useAuth();
   const [amountUSD, setAmountUSD] = useState("");
   const [payCurrency, setPayCurrency] = useState("btc");
   const [busy, setBusy] = useState(false);
   const [payment, setPayment] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState("waiting");
+  const [credited, setCredited] = useState(false);
+  const countdown = useCountdown(payment?.expires_at);
+
+  useEffect(() => {
+    if (!payment?.payment_id || credited) return;
+    const poll = async () => {
+      try {
+        const { data } = await api.get(`/wallet/crypto-status/${payment.payment_id}`);
+        setStatus(data.status);
+        if (data.credited) { setCredited(true); refresh(); toast.success("Wallet credited!"); }
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [payment?.payment_id, credited, refresh]);
 
   const generate = async () => {
     if (!amountUSD || parseFloat(amountUSD) < 1) { toast.error("Minimum $1 USD"); return; }
@@ -130,6 +173,8 @@ function CryptoTab() {
         pay_currency: payCurrency,
       });
       setPayment(data);
+      setStatus("waiting");
+      setCredited(false);
     } catch (e) {
       toast.error(formatError(e));
     } finally {
@@ -145,6 +190,7 @@ function CryptoTab() {
   };
 
   if (payment) {
+    const s = STATUS_LABEL[status] || STATUS_LABEL.waiting;
     return (
       <div className="space-y-5">
         <div className="lootra-card p-5 space-y-4">
@@ -166,15 +212,31 @@ function CryptoTab() {
             </div>
           </div>
 
-          <div className="flex items-start gap-2 text-xs text-neutral-400">
-            <AlertCircle className="w-4 h-4 text-[#FFB020] shrink-0 mt-0.5" />
-            <span>Send the exact amount shown. Your wallet will be credited automatically once the transaction is confirmed on-chain (usually 10–30 minutes). Do not close this page until you have copied the address.</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-mono ${s.color}`}>{s.text}</span>
+              {!credited && status !== "failed" && status !== "expired" && (
+                <span className="inline-block w-2 h-2 rounded-full bg-current animate-pulse" style={{color: "inherit"}} />
+              )}
+            </div>
+            {countdown !== null && !credited && status !== "expired" && (
+              <span className="text-[10px] font-mono text-neutral-500">Expires in {countdown}</span>
+            )}
           </div>
+
+          {!credited && (
+            <div className="flex items-start gap-2 text-xs text-neutral-400">
+              <AlertCircle className="w-4 h-4 text-[#FFB020] shrink-0 mt-0.5" />
+              <span>Send the exact amount shown. Status updates automatically every 30 seconds. Your wallet will be credited once confirmed on-chain (usually 10–30 min).</span>
+            </div>
+          )}
         </div>
 
-        <button onClick={() => setPayment(null)} className="lootra-btn-secondary w-full">
-          Generate a new payment
-        </button>
+        {!credited && (
+          <button onClick={() => setPayment(null)} className="lootra-btn-secondary w-full">
+            Generate a new payment
+          </button>
+        )}
       </div>
     );
   }

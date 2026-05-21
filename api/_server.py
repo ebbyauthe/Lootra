@@ -841,7 +841,23 @@ async def crypto_topup(data: TopupCryptoIn, user: dict = Depends(get_current_use
         "pay_amount": resp.get("pay_amount"),
         "pay_currency": resp.get("pay_currency"),
         "order_id": order_id,
+        "expires_at": resp.get("expiration_estimate_date"),
     }
+
+@api.get("/wallet/crypto-status/{payment_id}")
+async def crypto_payment_status(payment_id: str, user: dict = Depends(get_current_user)):
+    pt = await db.crypto_topups.find_one({"payment_id": payment_id, "user_id": user["id"]}, {"_id": 0})
+    if not pt:
+        raise HTTPException(404, "Payment not found")
+    if pt.get("credited"):
+        return {"status": "finished", "credited": True}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"https://api.nowpayments.io/v1/payment/{payment_id}",
+            headers={"x-api-key": NOWPAYMENTS_API_KEY},
+        )
+    data = r.json()
+    return {"status": data.get("payment_status", "waiting"), "credited": False}
 
 # ---------------- Admin ----------------
 @api.get("/admin/stats")
