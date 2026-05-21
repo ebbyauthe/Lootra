@@ -1146,13 +1146,19 @@ async def list_banks():
 async def verify_account(body: VerifyAccountIn, _: dict = Depends(get_current_user)):
     if not FLW_SECRET_KEY:
         raise HTTPException(503, "Payment service not configured")
-    async with httpx.AsyncClient(timeout=10) as cl:
-        r = await cl.get(
-            "https://api.flutterwave.com/v3/accounts/resolve",
-            params={"account_number": body.account_number, "account_bank": body.bank_code},
-            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
-        )
-    data = r.json()
+    try:
+        async with httpx.AsyncClient(timeout=15) as cl:
+            r = await cl.get(
+                "https://api.flutterwave.com/v3/accounts/resolve",
+                params={"account_number": body.account_number, "account_bank": body.bank_code},
+                headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
+            )
+        data = r.json()
+    except httpx.TimeoutException:
+        raise HTTPException(504, "Flutterwave timed out — please try again")
+    except Exception as e:
+        log.error(f"verify_account error: {e}")
+        raise HTTPException(502, "Could not reach payment service — please try again")
     if data.get("status") != "success":
         raise HTTPException(400, "Could not verify account. Check the account number and bank.")
     return {"account_name": data["data"]["account_name"]}
