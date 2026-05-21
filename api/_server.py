@@ -233,6 +233,8 @@ class TopupCryptoIn(BaseModel):
 # ---------------- Startup ----------------
 @app.on_event("startup")
 async def startup():
+    if db is None:
+        return
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.listings.create_index("id", unique=True)
@@ -1129,4 +1131,5 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown():
-    client.close()
+    if client is not None:
+        client.close()
