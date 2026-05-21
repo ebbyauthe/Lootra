@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { useBlocker } from "react-router-dom";
 import { toast } from "sonner";
-import { CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle, RefreshCw, X } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
@@ -177,6 +178,30 @@ function FiatTab() {
   );
 }
 
+function CancelDialog({ onConfirm, onDismiss }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="lootra-card max-w-sm w-full p-6 space-y-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-[#FFB020] shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-medium text-white">Cancel this payment?</div>
+            <div className="text-xs text-neutral-400 mt-1">
+              If you already sent funds to this address, they will still be credited automatically once confirmed on-chain. You can safely cancel if you haven't sent anything yet.
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onDismiss} className="lootra-btn-secondary flex-1 text-sm">Keep waiting</button>
+          <button onClick={onConfirm} className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-xs">
+            Cancel payment
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CryptoTab() {
   const { refresh } = useAuth();
   const [amountUSD, setAmountUSD] = useState("");
@@ -188,7 +213,24 @@ function CryptoTab() {
   const [status, setStatus] = useState("waiting");
   const [credited, setCredited] = useState(false);
   const [nextPoll, setNextPoll] = useState(30);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const countdown = useCountdown(payment?.expires_at);
+
+  const isPendingPayment = !!payment && !credited && status !== "failed" && status !== "expired";
+
+  // Block in-app navigation while payment is pending
+  const blocker = useBlocker(useCallback(() => isPendingPayment, [isPendingPayment]));
+  useEffect(() => {
+    if (blocker.state === "blocked") setShowCancelDialog(true);
+  }, [blocker.state]);
+
+  // Block browser tab close / refresh while payment is pending
+  useEffect(() => {
+    if (!isPendingPayment) return;
+    const handler = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isPendingPayment]);
 
   useEffect(() => {
     if (!payment?.payment_id || credited) return;
@@ -244,6 +286,17 @@ function CryptoTab() {
     toast.success("Copied!");
   };
 
+  const cancelPayment = () => {
+    setPayment(null);
+    setShowCancelDialog(false);
+    if (blocker.state === "blocked") blocker.proceed?.();
+  };
+
+  const dismissCancel = () => {
+    setShowCancelDialog(false);
+    if (blocker.state === "blocked") blocker.reset?.();
+  };
+
   const coin = CRYPTO_OPTIONS.find((c) => c.code === payCurrency);
   const payCoin = payment ? CRYPTO_OPTIONS.find((c) => c.code === payment.pay_currency) || coin : null;
   const statusMeta = STATUS_META[status] || STATUS_META.waiting;
@@ -252,6 +305,8 @@ function CryptoTab() {
 
   if (payment) {
     return (
+      <>
+      {showCancelDialog && <CancelDialog onConfirm={cancelPayment} onDismiss={dismissCancel} />}
       <div className="space-y-4">
         <StepBar step={step} />
 
@@ -362,11 +417,15 @@ function CryptoTab() {
         )}
 
         {!credited && !isError && (
-          <button onClick={() => setPayment(null)} className="lootra-btn-secondary w-full text-sm">
-            ← Generate new payment
+          <button
+            onClick={() => setShowCancelDialog(true)}
+            className="w-full py-2.5 border border-[#2A2A2A] text-neutral-500 hover:border-[#FF453A] hover:text-[#FF453A] transition-colors font-mono text-xs flex items-center justify-center gap-2"
+          >
+            <X className="w-3.5 h-3.5" /> Cancel payment
           </button>
         )}
       </div>
+      </>
     );
   }
 
