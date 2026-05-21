@@ -527,7 +527,7 @@ async def verify_email(token: str):
 @api.post("/auth/resend-verification")
 async def resend_verification(data: ForgotPasswordIn):
     user = await db.users.find_one({"email": data.email.lower()})
-    if not user or user.get("email_verified", True):
+    if not user or user.get("email_verified", False):
         return {"ok": True}
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(hours=24)
