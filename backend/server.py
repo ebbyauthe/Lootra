@@ -1148,10 +1148,10 @@ async def verify_account(body: VerifyAccountIn, _: dict = Depends(get_current_us
         raise HTTPException(503, "Payment service not configured")
     try:
         async with httpx.AsyncClient(timeout=15) as cl:
-            r = await cl.get(
+            r = await cl.post(
                 "https://api.flutterwave.com/v3/accounts/resolve",
-                params={"account_number": body.account_number, "account_bank": body.bank_code},
-                headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
+                json={"account_number": body.account_number, "account_bank": body.bank_code},
+                headers={"Authorization": f"Bearer {FLW_SECRET_KEY}", "Content-Type": "application/json"},
             )
         log.info(f"FLW resolve status={r.status_code} body={r.text[:300]}")
         if r.status_code == 401:
