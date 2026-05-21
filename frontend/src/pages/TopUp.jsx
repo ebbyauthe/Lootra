@@ -7,13 +7,20 @@ import { useAuth } from "../context/AuthContext";
 import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
 
 const CRYPTO_OPTIONS = [
-  { code: "btc",  label: "Bitcoin",   ticker: "BTC",  network: "Bitcoin Network", dot: "#F7931A" },
-  { code: "eth",  label: "Ethereum",  ticker: "ETH",  network: "ERC20",           dot: "#627EEA" },
-  { code: "usdt", label: "Tether",    ticker: "USDT", network: "TRC20",           dot: "#26A17B" },
-  { code: "usdc", label: "USD Coin",  ticker: "USDC", network: "ERC20",           dot: "#2775CA" },
-  { code: "ltc",  label: "Litecoin",  ticker: "LTC",  network: "Litecoin",        dot: "#345D9D" },
-  { code: "sol",  label: "Solana",    ticker: "SOL",  network: "Solana",          dot: "#9945FF" },
+  { code: "btc",  label: "Bitcoin",   ticker: "BTC",  network: "Bitcoin Network", dot: "#F7931A", uriScheme: "bitcoin"  },
+  { code: "eth",  label: "Ethereum",  ticker: "ETH",  network: "ERC20",           dot: "#627EEA", uriScheme: "ethereum" },
+  { code: "usdt", label: "Tether",    ticker: "USDT", network: "TRC20",           dot: "#26A17B", uriScheme: null       },
+  { code: "usdc", label: "USD Coin",  ticker: "USDC", network: "ERC20",           dot: "#2775CA", uriScheme: null       },
+  { code: "ltc",  label: "Litecoin",  ticker: "LTC",  network: "Litecoin",        dot: "#345D9D", uriScheme: "litecoin" },
+  { code: "sol",  label: "Solana",    ticker: "SOL",  network: "Solana",          dot: "#9945FF", uriScheme: "solana"   },
 ];
+
+function cryptoURI(coin, address, amount) {
+  if (!address) return "";
+  if (!coin?.uriScheme) return address;
+  const base = `${coin.uriScheme}:${address}`;
+  return amount ? `${base}?amount=${amount}` : base;
+}
 
 const STATUS_META = {
   waiting:        { text: "Waiting for payment",   step: 1, color: "text-[#FFB020]", dot: "#FFB020" },
@@ -273,15 +280,21 @@ function CryptoTab() {
           <div className="lootra-card overflow-hidden">
             {/* QR + coin header */}
             <div className="p-5 flex flex-col items-center gap-4 border-b border-[#2A2A2A]">
-              <div className="p-3 bg-white rounded-xl shadow-lg">
-                <QRCodeSVG
-                  value={payment.pay_address}
-                  size={160}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                  level="M"
-                />
-              </div>
+              {payment.pay_address ? (
+                <div className="p-3 bg-white rounded-xl shadow-lg">
+                  <QRCodeSVG
+                    value={cryptoURI(payCoin, payment.pay_address, payment.pay_amount)}
+                    size={160}
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    level="M"
+                  />
+                </div>
+              ) : (
+                <div className="w-[184px] h-[184px] border border-[#2A2A2A] flex items-center justify-center text-xs font-mono text-neutral-500 text-center px-4">
+                  QR unavailable — use address below
+                </div>
+              )}
               <div className="flex items-center gap-2 px-3 py-1.5 border border-[#2A2A2A] rounded-full">
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: payCoin?.dot }} />
                 <span className="text-xs font-mono text-neutral-300">
