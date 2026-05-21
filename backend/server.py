@@ -1289,6 +1289,15 @@ async def admin_withdrawals(status: Optional[str] = None, _: dict = Depends(requ
         flt["status"] = status
     return await db.withdrawals.find(flt, {"_id": 0}).sort([("created_at", -1)]).to_list(200)
 
+@api.get("/admin/server-ip")
+async def server_ip(_: dict = Depends(require_admin)):
+    try:
+        async with httpx.AsyncClient(timeout=5) as cl:
+            r = await cl.get("https://api.ipify.org?format=json")
+            return r.json()
+    except Exception:
+        raise HTTPException(502, "Could not fetch IP")
+
 @api.get("/admin/config")
 async def get_config(_: dict = Depends(require_admin)):
     config = await db.config.find_one({"key": "fees"}, {"_id": 0})
