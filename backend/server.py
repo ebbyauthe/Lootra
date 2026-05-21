@@ -71,8 +71,10 @@ def verify_pw(pw: str, hashed: str) -> bool:
         return False
 
 def make_access_token(uid: str, email: str, role: str) -> str:
+    now = now_utc()
     payload = {"sub": uid, "email": email, "role": role,
-               "exp": now_utc() + timedelta(hours=12), "type": "access"}
+               "iat": now.timestamp(),
+               "exp": now + timedelta(hours=12), "type": "access"}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 def make_refresh_token(uid: str) -> str:
@@ -132,6 +134,9 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+        logged_out_at = user.get("logged_out_at")
+        if logged_out_at and payload.get("iat", 0) < logged_out_at:
+            raise HTTPException(status_code=401, detail="Session invalidated")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -429,8 +434,14 @@ async def resend_verification(data: ForgotPasswordIn):
     return {"ok": True}
 
 @api.post("/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
     clear_auth_cookies(response)
+    token = request.cookies.get("access_token") or request.headers.get("Authorization", "")[7:]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG], options={"verify_exp": False})
+        await db.users.update_one({"id": payload["sub"]}, {"$set": {"logged_out_at": now_utc().timestamp()}})
+    except Exception:
+        pass
     return {"ok": True}
 
 @api.get("/auth/me")
