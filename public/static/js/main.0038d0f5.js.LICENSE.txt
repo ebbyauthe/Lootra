@@ -56,6 +56,12 @@
  */
 
 /**
+ * @license qrcode.react
+ * Copyright (c) Paul O'Shannessy
+ * SPDX-License-Identifier: ISC
+ */
+
+/**
  * react-router v7.15.1
  *
  * Copyright (c) Remix Software Inc.
