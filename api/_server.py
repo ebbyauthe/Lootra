@@ -1122,7 +1122,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=_origins if _origins else [],
-    allow_origin_regex=r"https?://localhost(:\d+)?|https://.*\.vercel\.app",
+    allow_origin_regex=r"https?://localhost(:\d+)?|https://.*\.vercel\.app|https://(www\.)?lootra\.org",
     allow_methods=["*"],
     allow_headers=["*"],
 )
