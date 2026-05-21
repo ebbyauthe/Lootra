@@ -22,7 +22,6 @@ export default function ListingDetail() {
   }, [id]);
 
   const buy = async () => {
-    if (!user) { nav("/login"); return; }
     setBusy(true);
     try {
       const { data } = await api.post(`/orders/${id}/purchase`);
@@ -108,13 +107,26 @@ export default function ListingDetail() {
           {user?.role === "admin" ? (
             <div className="lootra-badge w-full text-center text-neutral-400">Admin accounts cannot purchase</div>
           ) : listing.status === "active" ? (
-            <button onClick={buy} disabled={busy || (user && user.id === listing.seller_id)} className="lootra-btn-primary w-full" data-testid="buy-now-btn">
-              {busy ? "Processing…" : user?.id === listing.seller_id ? "Your own listing" : "Buy with escrow"}
-            </button>
+            !user ? (
+              <div className="space-y-3">
+                <div className="border border-[#2A2A2A] p-4 space-y-3">
+                  <div className="text-sm font-medium text-white">Create an account to buy</div>
+                  <div className="text-xs text-neutral-400">Join Lootra to purchase securely with escrow protection.</div>
+                  <div className="flex gap-2">
+                    <Link to="/register" className="lootra-btn-primary flex-1 text-center text-sm">Create account</Link>
+                    <Link to="/login" className="lootra-btn-secondary flex-1 text-center text-sm">Sign in</Link>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button onClick={buy} disabled={busy || user.id === listing.seller_id} className="lootra-btn-primary w-full" data-testid="buy-now-btn">
+                {busy ? "Processing…" : user.id === listing.seller_id ? "Your own listing" : "Buy with escrow"}
+              </button>
+            )
           ) : (
             <div className="lootra-badge w-full text-center" data-testid="listing-unavailable">UNAVAILABLE — {listing.status?.toUpperCase()}</div>
           )}
-          {user?.role !== "admin" && (
+          {user && user.role !== "admin" && (
             <button onClick={watch} className="lootra-btn-secondary w-full inline-flex items-center justify-center gap-2" data-testid="watchlist-btn">
               <Heart className="w-4 h-4" /> Add to watchlist
             </button>
