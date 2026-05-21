@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, CheckCircle, AlertTriangle, Star, Send, Shield, Lock, Image, Clock, X } from "lucide-react";
+import { Eye, EyeOff, CheckCircle, AlertTriangle, Star, Send, Shield, Lock, Image, X } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import EscrowStepper from "../components/EscrowStepper";
@@ -27,10 +27,44 @@ function useCountdown(deadline) {
 }
 
 function formatCountdown(secs) {
-  if (secs === null) return null;
+  if (secs === null) return "--:--";
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function CircleTimer({ remaining, total }) {
+  const SIZE = 96;
+  const STROKE = 6;
+  const r = (SIZE - STROKE) / 2;
+  const circumference = 2 * Math.PI * r;
+  const fraction = remaining === null ? 1 : Math.max(0, remaining / total);
+  const offset = circumference * (1 - fraction);
+  const color = fraction > 0.5 ? "#CCFF00" : fraction > 0.2 ? "#facc15" : "#ef4444";
+
+  return (
+    <div className="relative shrink-0" style={{ width: SIZE, height: SIZE }}>
+      <svg width={SIZE} height={SIZE} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={SIZE / 2} cy={SIZE / 2} r={r} fill="none" stroke="#2A2A2A" strokeWidth={STROKE} />
+        <circle
+          cx={SIZE / 2} cy={SIZE / 2} r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={STROKE}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={{ transition: "stroke-dashoffset 1s linear, stroke 0.5s ease" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="font-mono text-sm font-bold leading-none" style={{ color }}>
+          {formatCountdown(remaining)}
+        </span>
+        <span className="font-mono text-[9px] text-neutral-600 mt-1">left</span>
+      </div>
+    </div>
+  );
 }
 
 export default function OrderDetail() {
@@ -200,22 +234,30 @@ export default function OrderDetail() {
 
       {/* Handover countdown */}
       {inHandover && handoverSecs !== null && (
-        <div className={`border p-4 flex items-center gap-3 font-mono text-sm ${handoverSecs < 300 ? "border-red-500/50 bg-red-500/5 text-red-400" : "border-yellow-500/50 bg-yellow-500/5 text-yellow-400"}`}>
-          <Clock className="w-4 h-4 shrink-0" />
+        <div className={`border p-5 flex items-center gap-5 ${handoverSecs < 300 ? "border-red-500/30 bg-red-500/5" : handoverSecs < 1200 ? "border-yellow-500/30 bg-yellow-500/5" : "border-[#CCFF00]/20 bg-[#CCFF00]/5"}`}>
+          <CircleTimer remaining={handoverSecs} total={65 * 60} />
           <div>
-            <div className="font-semibold">Handover deadline: {formatCountdown(handoverSecs)}</div>
-            <div className="text-xs text-neutral-500 mt-0.5">If the account is not handed over in time, the dispute will be auto-triggered and the buyer will be refunded.</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-neutral-500 mb-1">Handover window</div>
+            <div className="font-medium text-white text-sm">Seller must hand over the account before time runs out.</div>
+            <div className="text-xs text-neutral-500 mt-1 leading-relaxed">
+              {handoverSecs === 0
+                ? "Time expired — dispute auto-triggered."
+                : "If time expires without handover, the dispute is auto-triggered and the buyer is refunded."}
+            </div>
           </div>
         </div>
       )}
 
       {/* Complaint window countdown */}
       {complaintWindowOpen && complaintSecs !== null && isBuyer && (
-        <div className="border border-blue-500/50 bg-blue-500/5 p-4 flex items-center gap-3 font-mono text-sm text-blue-400">
-          <Clock className="w-4 h-4 shrink-0" />
+        <div className="border border-blue-500/30 bg-blue-500/5 p-5 flex items-center gap-5">
+          <CircleTimer remaining={complaintSecs} total={24 * 60 * 60} />
           <div>
-            <div className="font-semibold">Complaint window: {formatCountdown(complaintSecs)}</div>
-            <div className="text-xs text-neutral-500 mt-0.5">If the seller reclaims the account, raise a complaint before this window closes.</div>
+            <div className="font-mono text-xs uppercase tracking-widest text-neutral-500 mb-1">Complaint window</div>
+            <div className="font-medium text-white text-sm">You have 24 hours to raise a complaint.</div>
+            <div className="text-xs text-neutral-500 mt-1 leading-relaxed">
+              If the seller reclaims the account after you confirmed, raise a complaint before this window closes.
+            </div>
           </div>
         </div>
       )}

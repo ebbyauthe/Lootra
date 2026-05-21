@@ -199,9 +199,17 @@ export default function AdminDashboard() {
               <td className="px-4 py-3 text-neutral-400">@{o.seller_username}</td>
               <td className="px-4 py-3 font-mono text-[#CCFF00]">${o.amount.toFixed(2)}</td>
               <td className="px-4 py-3 font-mono text-xs">{o.status}</td>
-              <td className="px-4 py-3 text-right">
+              <td className="px-4 py-3 text-right space-x-2">
+                <Link to={`/orders/${o.id}`} className="lootra-btn-secondary !py-1 !px-2 text-xs inline-flex items-center gap-1">
+                  <MessageSquare className="w-3 h-3" /> Chat
+                </Link>
                 {["PAID","DELIVERED","DISPUTED"].includes(o.status) && (
                   <button onClick={() => refund(o.id)} className="lootra-btn-secondary !py-1 !px-2 text-xs" data-testid={`refund-${o.id}`}>Refund buyer</button>
+                )}
+                {o.status === "DISPUTED" && (
+                  <button onClick={() => { setSettleModal({ order: o }); setSettleNote(""); }} className="lootra-btn-primary !py-1 !px-2 text-xs">
+                    Settle
+                  </button>
                 )}
               </td>
             </tr>
