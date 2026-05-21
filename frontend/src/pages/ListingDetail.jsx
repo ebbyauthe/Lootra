@@ -16,9 +16,14 @@ export default function ListingDetail() {
   const [listing, setListing] = useState(null);
   const [activeImg, setActiveImg] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [feeRate, setFeeRate] = useState(0.05);
 
   useEffect(() => {
     api.get(`/listings/${id}`).then(({ data }) => setListing(data)).catch(() => toast.error("Listing not found"));
+    api.get("/wallet/balance").then(r => {
+      const rate = r.data?.fee_config?.buyer_fee_rate;
+      if (rate != null) setFeeRate(rate);
+    }).catch(() => {});
   }, [id]);
 
   const buy = async () => {
@@ -100,6 +105,22 @@ export default function ListingDetail() {
               <div className="text-xs text-neutral-500 font-mono mt-0.5">= ${listing.price?.toFixed(2)} USD</div>
             )}
           </div>
+          {listing.price && (
+            <div className="bg-[#1a1a1a] rounded-xl px-4 py-3 space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between text-neutral-400">
+                <span>Listing price</span>
+                <span>{formatPrice(listing.price)}</span>
+              </div>
+              <div className="flex justify-between text-neutral-400">
+                <span>Platform fee ({(feeRate * 100).toFixed(0)}%)</span>
+                <span>+{formatPrice(listing.price * feeRate)}</span>
+              </div>
+              <div className="flex justify-between border-t border-[#2A2A2A] pt-1.5 font-medium">
+                <span className="text-white">You pay</span>
+                <span className="text-[#CCFF00]">{formatPrice(listing.price * (1 + feeRate))}</span>
+              </div>
+            </div>
+          )}
           <div className="text-xs text-neutral-400 flex items-start gap-2">
             <Lock className="w-4 h-4 text-[#CCFF00] shrink-0 mt-0.5" />
             <span>Funds held in escrow until you confirm successful account access.</span>

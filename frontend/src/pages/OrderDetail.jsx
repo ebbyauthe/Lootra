@@ -154,7 +154,7 @@ export default function OrderDetail() {
     setBusy(true);
     try {
       await api.post(`/orders/${id}/confirm`, { screenshot: confirmScreenshot });
-      toast.success("Account secured — 24-hour complaint window started");
+      toast.success("Account confirmed — funds released to seller");
       setConfirmOpen(false); setConfirmScreenshot(null);
       await loadOrder();
     } catch (e) { toast.error(formatError(e)); }
@@ -248,19 +248,6 @@ export default function OrderDetail() {
         </div>
       )}
 
-      {/* Complaint window countdown */}
-      {complaintWindowOpen && complaintSecs !== null && isBuyer && (
-        <div className="border border-blue-500/30 bg-blue-500/5 p-5 flex items-center gap-5">
-          <CircleTimer remaining={complaintSecs} total={24 * 60 * 60} />
-          <div>
-            <div className="font-mono text-xs uppercase tracking-widest text-neutral-500 mb-1">Complaint window</div>
-            <div className="font-medium text-white text-sm">You have 24 hours to raise a complaint.</div>
-            <div className="text-xs text-neutral-500 mt-1 leading-relaxed">
-              If the seller reclaims the account after you confirmed, raise a complaint before this window closes.
-            </div>
-          </div>
-        </div>
-      )}
 
       <EscrowStepper status={order.status} />
 
@@ -308,14 +295,6 @@ export default function OrderDetail() {
                   </div>
                 )}
 
-                {complaintWindowOpen && (
-                  <div className="pt-3 border-t border-[#2A2A2A]">
-                    <button onClick={() => { setReason(""); setComplaintOpen(true); }} className="lootra-btn-secondary inline-flex items-center gap-2 !border-red-500/50 !text-red-400 text-sm">
-                      <AlertTriangle className="w-4 h-4" /> Raise a complaint
-                    </button>
-                    <p className="text-xs text-neutral-500 mt-2">Use this if the seller reclaimed the account after you confirmed.</p>
-                  </div>
-                )}
               </>
             )}
 
@@ -324,7 +303,7 @@ export default function OrderDetail() {
                 <p>Credentials are held in the encrypted vault. Work with the buyer in chat to complete the handover.</p>
                 {order.status === "PAID" && <p className="text-yellow-400 font-mono text-xs">⏳ Buyer has not revealed credentials yet. Help them via chat.</p>}
                 {order.status === "DELIVERED" && <p className="text-blue-400 font-mono text-xs">👁 Buyer revealed credentials — assist with verification codes in chat.</p>}
-                {order.status === "CONFIRMED" && <p className="text-green-400 font-mono text-xs">✓ Buyer confirmed access. Funds release after 24h complaint window.</p>}
+                {order.status === "CONFIRMED" && <p className="text-green-400 font-mono text-xs">✓ Buyer confirmed access. Funds released.</p>}
                 {order.status === "RELEASED" && <p className="text-[#CCFF00] font-mono text-xs">✓ Funds released to your wallet.</p>}
               </div>
             )}
@@ -452,7 +431,7 @@ export default function OrderDetail() {
       {/* Confirm modal */}
       {confirmOpen && (
         <Modal onClose={() => { setConfirmOpen(false); setConfirmScreenshot(null); }} title="Confirm account secured">
-          <p className="text-sm text-neutral-400 mb-4">Upload a screenshot showing you have access to the account. This starts the 24-hour complaint window before funds are released.</p>
+          <p className="text-sm text-neutral-400 mb-4">Upload a screenshot confirming you have access. Funds will be immediately released to the seller once you confirm.</p>
           <input ref={confirmFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleImagePick(e, setConfirmScreenshot)} />
           {confirmScreenshot ? (
             <div className="relative mb-4">

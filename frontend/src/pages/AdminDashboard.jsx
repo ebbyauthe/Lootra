@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
+import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight, MessageSquare, Settings, ArrowDownToLine } from "lucide-react";
 import { api, formatError } from "../lib/api";
 
 export default function AdminDashboard() {
@@ -18,10 +18,15 @@ export default function AdminDashboard() {
   const [settleModal, setSettleModal] = useState(null);
   const [settleNote, setSettleNote] = useState("");
   const [settling, setSettling] = useState(false);
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [rejectModal, setRejectModal] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [config, setConfig] = useState(null);
+  const [configSaving, setConfigSaving] = useState(false);
 
   const load = async () => {
     const safe = async (fn) => { try { return await fn(); } catch (e) { toast.error(formatError(e)); return null; } };
-    const [s, p, ac, o, d, u, a] = await Promise.all([
+    const [s, p, ac, o, d, u, a, w, cfg] = await Promise.all([
       safe(() => api.get("/admin/stats")),
       safe(() => api.get("/admin/listings", { params: { status: "pending" } })),
       safe(() => api.get("/admin/listings", { params: { status: "active" } })),
@@ -29,6 +34,8 @@ export default function AdminDashboard() {
       safe(() => api.get("/admin/orders", { params: { status: "DISPUTED" } })),
       safe(() => api.get("/admin/users")),
       safe(() => api.get("/admin/audit", { params: { limit: 100 } })),
+      safe(() => api.get("/admin/withdrawals")),
+      safe(() => api.get("/admin/config")),
     ]);
     if (s) setStats(s.data);
     if (p && Array.isArray(p.data)) setPending(p.data);
@@ -37,6 +44,8 @@ export default function AdminDashboard() {
     if (d && Array.isArray(d.data)) setDisputed(d.data);
     if (u && Array.isArray(u.data)) setUsers(u.data);
     if (a && Array.isArray(a.data)) setAudit(a.data);
+    if (w && Array.isArray(w.data)) setWithdrawals(w.data);
+    if (cfg) setConfig(cfg.data);
   };
   useEffect(() => { load(); }, []);
 
@@ -47,6 +56,29 @@ export default function AdminDashboard() {
   const peekVault = async (id) => {
     try { const { data } = await api.get(`/admin/vault/${id}`); setVault({ id, ...data }); }
     catch (e) { toast.error(formatError(e)); }
+  };
+
+  const approveWithdrawal = async (wid) => {
+    try { await api.post(`/admin/withdrawals/${wid}/approve`); toast.success("Withdrawal approved"); load(); }
+    catch (e) { toast.error(formatError(e)); }
+  };
+
+  const rejectWithdrawal = async () => {
+    if (!rejectReason.trim()) { toast.error("Provide a reason"); return; }
+    try {
+      await api.post(`/admin/withdrawals/${rejectModal.id}/reject`, { reason: rejectReason });
+      toast.success("Withdrawal rejected — funds returned to user");
+      setRejectModal(null); setRejectReason(""); load();
+    } catch (e) { toast.error(formatError(e)); }
+  };
+
+  const saveConfig = async () => {
+    setConfigSaving(true);
+    try {
+      await api.put("/admin/config", config);
+      toast.success("Config saved");
+    } catch (e) { toast.error(formatError(e)); }
+    finally { setConfigSaving(false); }
   };
 
   const settle = async (action) => {
@@ -60,13 +92,17 @@ export default function AdminDashboard() {
     finally { setSettling(false); }
   };
 
+  const pendingWithdrawals = withdrawals.filter(w => w.status === "pending");
+
   const TABS = [
     { id: "pending", label: "Pending", count: pending.length },
     { id: "active", label: "Active listings", count: active.length },
     { id: "disputed", label: "Disputes", count: disputed.length },
     { id: "orders", label: "All orders", count: orders.length },
+    { id: "withdrawals", label: "Withdrawals", count: pendingWithdrawals.length },
     { id: "users", label: "Users", count: users.length },
     { id: "audit", label: "Audit log", count: audit.length },
+    { id: "config", label: "Config", count: null },
   ];
 
   return (
@@ -100,7 +136,7 @@ export default function AdminDashboard() {
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`px-4 py-3 text-sm transition-colors border-b-2 ${tab === t.id ? "border-[#CCFF00] text-white" : "border-transparent text-neutral-400 hover:text-white"}`}
             data-testid={`admin-tab-${t.id}`}>
-            {t.label} <span className="font-mono text-xs text-neutral-500">({t.count})</span>
+            {t.label} {t.count !== null && <span className="font-mono text-xs text-neutral-500">({t.count})</span>}
           </button>
         ))}
       </div>
@@ -253,6 +289,83 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {tab === "withdrawals" && (
+        <div className="space-y-4">
+          {withdrawals.length === 0 ? (
+            <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-sm text-neutral-500 font-mono">No withdrawal requests.</div>
+          ) : withdrawals.map((w) => (
+            <div key={w.id} className="lootra-card p-5 space-y-3">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-xs text-neutral-500">#{w.id.slice(0,8)}</span>
+                    <span className={`lootra-badge text-[9px] ${w.status === "pending" ? "text-[#FFB020]" : w.status === "approved" ? "text-[#CCFF00]" : "text-[#FF453A]"}`}>{w.status.toUpperCase()}</span>
+                  </div>
+                  <div className="font-medium mt-1">@{w.username || w.user_id?.slice(0,8)}</div>
+                  <div className="text-xs text-neutral-400 font-mono mt-0.5">
+                    <span className="text-[#CCFF00]">${w.amount_usd?.toFixed(2)} USD</span>
+                    {w.amount_ngn && <span className="ml-2 text-neutral-500">≈ ₦{Number(w.amount_ngn).toLocaleString()}</span>}
+                  </div>
+                  <div className="text-xs text-neutral-500 font-mono mt-1">
+                    {w.bank_name} · {w.account_number} · {w.account_name}
+                  </div>
+                  <div className="text-[10px] font-mono text-neutral-600 mt-0.5">{new Date(w.created_at).toLocaleString()}</div>
+                  {w.reject_reason && (
+                    <div className="mt-2 text-xs text-[#FF453A] bg-[#FF453A]/5 border border-[#FF453A]/20 p-2">Rejected: {w.reject_reason}</div>
+                  )}
+                </div>
+                {w.status === "pending" && (
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => approveWithdrawal(w.id)}
+                      className="lootra-btn-primary !py-1.5 !px-3 text-xs inline-flex items-center gap-1"
+                    ><Check className="w-3 h-3" /> Approve</button>
+                    <button
+                      onClick={() => { setRejectModal(w); setRejectReason(""); }}
+                      className="lootra-btn-secondary !py-1.5 !px-3 text-xs !border-[#FF453A] !text-[#FF453A] inline-flex items-center gap-1"
+                    ><X className="w-3 h-3" /> Reject</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "config" && config && (
+        <div className="max-w-lg space-y-6">
+          <div className="lootra-card p-6 space-y-5">
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-[#CCFF00]" />
+              <span className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Fee Configuration</span>
+            </div>
+            {[
+              { key: "buyer_fee_rate", label: "Buyer fee rate", hint: "e.g. 0.05 = 5%", type: "number", step: "0.001" },
+              { key: "seller_withdrawal_fee_rate", label: "Seller withdrawal fee rate", hint: "e.g. 0.05 = 5%", type: "number", step: "0.001" },
+              { key: "min_withdrawal_usd", label: "Minimum withdrawal (USD)", hint: "e.g. 0.80", type: "number", step: "0.01" },
+              { key: "hold_hours", label: "Hold period (hours)", hint: "e.g. 4", type: "number", step: "1" },
+            ].map(({ key, label, hint, type, step }) => (
+              <div key={key} className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">{label}</label>
+                <input
+                  type={type}
+                  step={step}
+                  value={config[key] ?? ""}
+                  onChange={e => setConfig(c => ({ ...c, [key]: parseFloat(e.target.value) || e.target.value }))}
+                  className="w-full bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-[#CCFF00] text-white"
+                />
+                <div className="text-[10px] font-mono text-neutral-600">{hint}</div>
+              </div>
+            ))}
+            <button
+              onClick={saveConfig}
+              disabled={configSaving}
+              className="w-full lootra-btn-primary py-3 inline-flex items-center justify-center gap-2"
+            ><ArrowDownToLine className="w-4 h-4" />{configSaving ? "Saving…" : "Save config"}</button>
+          </div>
+        </div>
+      )}
+
       {preview && <ListingPreviewModal listing={preview} onClose={() => setPreview(null)} onApprove={() => { approve(preview.id); setPreview(null); }} onReject={() => { reject(preview.id); setPreview(null); }} />}
 
       {settleModal && (
@@ -280,6 +393,31 @@ export default function AdminDashboard() {
             </div>
             <div className="flex justify-end mt-3">
               <button onClick={() => setSettleModal(null)} className="lootra-btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setRejectModal(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-md w-full p-6 space-y-4">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Reject withdrawal</div>
+            <div className="text-sm font-medium">@{rejectModal.username} — ${rejectModal.amount_usd?.toFixed(2)}</div>
+            <div className="text-xs text-neutral-400 font-mono">{rejectModal.bank_name} · {rejectModal.account_number}</div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Reason (shown to user)</label>
+              <textarea
+                className="lootra-input min-h-[80px]"
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Explain why this withdrawal is being rejected…"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={rejectWithdrawal} className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-sm inline-flex items-center justify-center gap-2">
+                <X className="w-4 h-4" /> Reject & refund
+              </button>
+              <button onClick={() => setRejectModal(null)} className="lootra-btn-secondary">Cancel</button>
             </div>
           </div>
         </div>

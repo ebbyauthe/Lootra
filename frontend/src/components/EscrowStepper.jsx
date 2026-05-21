@@ -4,7 +4,6 @@ import { Check } from "lucide-react";
 const STEPS = [
   { key: "PAID", label: "Funds Held" },
   { key: "DELIVERED", label: "Credentials Released" },
-  { key: "CONFIRMED", label: "Buyer Confirmed" },
   { key: "RELEASED", label: "Seller Paid" },
 ];
 
@@ -16,7 +15,8 @@ export default function EscrowStepper({ status }) {
       </div>
     );
   }
-  const currentIdx = STEPS.findIndex((s) => s.key === status);
+  const displayStatus = status === "CONFIRMED" ? "RELEASED" : status;
+  const currentIdx = STEPS.findIndex((s) => s.key === displayStatus);
   return (
     <div className="border border-[#2A2A2A] p-6 bg-[#121212]" data-testid="escrow-stepper">
       <div className="text-[10px] tracking-[0.2em] uppercase text-neutral-500 font-mono mb-4">Escrow Timeline</div>

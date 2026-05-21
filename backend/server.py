@@ -103,6 +103,47 @@ async def get_exchange_rates() -> dict:
     except Exception:
         return _rates_cache["rates"]
 
+_banks_cache: dict = {"banks": [], "updated_at": None}
+
+async def get_flutterwave_banks() -> list:
+    now = now_utc()
+    if _banks_cache["updated_at"] and (now - _banks_cache["updated_at"]).total_seconds() < 3600:
+        return _banks_cache["banks"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as cl:
+            r = await cl.get("https://api.flutterwave.com/v3/banks/NG",
+                             headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"})
+            data = r.json()
+            if data.get("status") == "success":
+                _banks_cache["banks"] = data.get("data", [])
+                _banks_cache["updated_at"] = now
+    except Exception:
+        pass
+    return _banks_cache["banks"]
+
+async def get_fee_config() -> dict:
+    config = await db.config.find_one({"key": "fees"}, {"_id": 0})
+    if not config:
+        return {"buyer_fee_rate": 0.05, "seller_withdrawal_fee_rate": 0.05, "min_withdrawal_usd": 0.80, "hold_hours": 4}
+    return config
+
+async def credit_seller_wallet(order: dict):
+    config = await get_fee_config()
+    withdrawable_after = (now_utc() + timedelta(hours=config.get("hold_hours", 4))).isoformat()
+    await db.wallet_credits.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": order["seller_id"],
+        "order_id": order["id"],
+        "amount": order["amount"],
+        "withdrawable_after": withdrawable_after,
+        "withdrawn": False,
+        "created_at": now_utc().isoformat(),
+    })
+    await db.users.update_one(
+        {"id": order["seller_id"]},
+        {"$inc": {"balance": order["amount"], "sales_count": 1, "trust_score": 2}}
+    )
+
 def sanitize_user(u: dict) -> dict:
     return {
         "id": u["id"],
@@ -228,6 +269,26 @@ class TopupCryptoIn(BaseModel):
     amount_usd: float = Field(gt=0)
     pay_currency: str
 
+class VerifyAccountIn(BaseModel):
+    bank_code: str
+    account_number: str = Field(min_length=10, max_length=10)
+
+class WithdrawIn(BaseModel):
+    amount_usd: float = Field(gt=0)
+    bank_code: str
+    bank_name: str
+    account_number: str
+    account_name: str
+
+class WithdrawalRejectIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+class FeeConfigIn(BaseModel):
+    buyer_fee_rate: float = Field(ge=0, le=0.5)
+    seller_withdrawal_fee_rate: float = Field(ge=0, le=0.5)
+    min_withdrawal_usd: float = Field(gt=0)
+    hold_hours: int = Field(ge=0, le=168)
+
 # ---------------- Startup ----------------
 @app.on_event("startup")
 async def startup():
@@ -240,6 +301,14 @@ async def startup():
     await db.messages.create_index([("order_id", 1), ("created_at", 1)])
     await db.ratings.create_index([("rated_id", 1), ("created_at", -1)])
     await db.ratings.create_index([("order_id", 1), ("rater_id", 1)], unique=True)
+    await db.wallet_credits.create_index([("user_id", 1), ("withdrawn", 1), ("withdrawable_after", 1)])
+    await db.withdrawals.create_index([("status", 1), ("created_at", -1)])
+    await db.config.create_index("key", unique=True)
+    if not await db.config.find_one({"key": "fees"}):
+        await db.config.insert_one({
+            "key": "fees", "buyer_fee_rate": 0.05, "seller_withdrawal_fee_rate": 0.05,
+            "min_withdrawal_usd": 0.80, "hold_hours": 4, "updated_at": now_utc().isoformat(),
+        })
     # Seed admin
     existing = await db.users.find_one({"email": ADMIN_EMAIL})
     if not existing:
@@ -310,7 +379,7 @@ async def _order_scheduler():
                 await db.orders.update_one({"id": o["id"]}, {"$set": {
                     "status": "RELEASED", "timeline": timeline, "updated_at": now.isoformat(),
                 }})
-                await db.users.update_one({"id": o["seller_id"]}, {"$inc": {"balance": o["amount"], "sales_count": 1, "trust_score": 2}})
+                await credit_seller_wallet(o)
                 log.info(f"Auto-released order {o['id']}")
         except Exception as e:
             log.error(f"Scheduler error: {e}")
@@ -367,7 +436,7 @@ async def login(data: LoginIn, request: Request, response: Response):
         await db.login_attempts.update_one({"identifier": key}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await db.login_attempts.delete_one({"identifier": key})
-    if not user.get("email_verified", True):
+    if not user.get("email_verified", False):
         raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     access = make_access_token(user["id"], user["email"], user.get("role", "user"))
     refresh = make_refresh_token(user["id"])
@@ -644,11 +713,14 @@ async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(400, "Listing not available")
     if listing["seller_id"] == user["id"]:
         raise HTTPException(400, "Cannot buy your own listing")
-    if user.get("balance", 0) < listing["price"]:
-        raise HTTPException(400, "Insufficient balance. Top up your wallet.")
+    config = await get_fee_config()
+    platform_fee = round(listing["price"] * config["buyer_fee_rate"], 2)
+    total_charge = round(listing["price"] + platform_fee, 2)
+    if user.get("balance", 0) < total_charge:
+        raise HTTPException(400, f"Insufficient balance. Total cost is ${total_charge:.2f} (includes {int(config['buyer_fee_rate']*100)}% platform fee). Top up your wallet.")
     oid = str(uuid.uuid4())
-    # Debit buyer, hold in escrow
-    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -listing["price"]}})
+    # Debit buyer (listing price + platform fee); listing price held in escrow
+    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -total_charge}})
     await db.listings.update_one({"id": listing_id}, {"$set": {"status": "sold", "updated_at": now_utc().isoformat()}})
     deadline = now_utc() + timedelta(minutes=65)
     order = {
@@ -660,6 +732,8 @@ async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
         "seller_id": listing["seller_id"],
         "seller_username": listing["seller_username"],
         "amount": listing["price"],
+        "platform_fee": platform_fee,
+        "total_charged": total_charge,
         "status": "PAID",
         "credentials_released": False,
         "handover_deadline": deadline.isoformat(),
@@ -744,18 +818,17 @@ async def confirm_order(order_id: str, body: ConfirmIn = ConfirmIn(), user: dict
         raise HTTPException(403, "Forbidden")
     if o["status"] not in ("PAID", "DELIVERED"):
         raise HTTPException(400, "Order not ready to confirm")
-    complaint_until = now_utc() + timedelta(hours=24)
     timeline = o.get("timeline", [])
-    timeline.append({"status": "CONFIRMED", "at": now_utc().isoformat(), "note": "Buyer confirmed account access secured."})
+    timeline.append({"status": "RELEASED", "at": now_utc().isoformat(), "note": "Buyer confirmed account access. Funds released to seller."})
     await db.orders.update_one({"id": order_id}, {"$set": {
-        "status": "CONFIRMED",
+        "status": "RELEASED",
         "confirm_screenshot": body.screenshot,
-        "complaint_window_until": complaint_until.isoformat(),
         "timeline": timeline,
         "updated_at": now_utc().isoformat(),
     }})
-    await audit("order.confirmed", user["id"], order_id)
-    return {"ok": True, "complaint_window_until": complaint_until.isoformat()}
+    await credit_seller_wallet(o)
+    await audit("order.confirmed_released", user["id"], order_id)
+    return {"ok": True}
 
 @api.post("/orders/{order_id}/dispute")
 async def dispute_order(order_id: str, body: DisputeIn, user: dict = Depends(get_current_user)):
@@ -804,7 +877,7 @@ async def admin_settle(order_id: str, body: SettleIn, admin: dict = Depends(requ
         await db.orders.update_one({"id": order_id}, {"$set": {
             "status": "RELEASED", "timeline": timeline, "updated_at": now_utc().isoformat(),
         }})
-        await db.users.update_one({"id": o["seller_id"]}, {"$inc": {"balance": o["amount"], "sales_count": 1, "trust_score": 2}})
+        await credit_seller_wallet(o)
         await audit("order.admin_release", admin["id"], order_id, {"amount": o["amount"]})
     else:
         timeline.append({"status": "REFUNDED", "at": now_utc().isoformat(), "note": note})
@@ -1059,6 +1132,162 @@ async def crypto_payment_status(payment_id: str, user: dict = Depends(get_curren
         )
     data = r.json()
     return {"status": data.get("payment_status", "waiting"), "credited": False}
+
+# ---------------- Banks / Withdrawal ----------------
+@api.get("/catalog/banks")
+async def list_banks():
+    return await get_flutterwave_banks()
+
+@api.post("/wallet/verify-account")
+async def verify_account(body: VerifyAccountIn, _: dict = Depends(get_current_user)):
+    if not FLW_SECRET_KEY:
+        raise HTTPException(503, "Payment service not configured")
+    async with httpx.AsyncClient(timeout=10) as cl:
+        r = await cl.get(
+            "https://api.flutterwave.com/v3/accounts/resolve",
+            params={"account_number": body.account_number, "account_bank": body.bank_code},
+            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
+        )
+    data = r.json()
+    if data.get("status") != "success":
+        raise HTTPException(400, "Could not verify account. Check the account number and bank.")
+    return {"account_name": data["data"]["account_name"]}
+
+@api.get("/wallet/balance")
+async def wallet_balance(user: dict = Depends(get_current_user)):
+    now = now_utc().isoformat()
+    available_credits = await db.wallet_credits.find(
+        {"user_id": user["id"], "withdrawn": False, "withdrawable_after": {"$lte": now}}
+    ).to_list(1000)
+    held_credits = await db.wallet_credits.find(
+        {"user_id": user["id"], "withdrawn": False, "withdrawable_after": {"$gt": now}}
+    ).to_list(1000)
+    available = round(sum(c["amount"] for c in available_credits), 2)
+    held = round(sum(c["amount"] for c in held_credits), 2)
+    next_release = min((c["withdrawable_after"] for c in held_credits), default=None)
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    fee_config = await get_fee_config()
+    return {"total": u.get("balance", 0), "available": available, "held": held, "next_release": next_release, "fee_config": fee_config}
+
+@api.post("/wallet/withdraw")
+async def request_withdrawal(body: WithdrawIn, user: dict = Depends(get_current_user)):
+    config = await get_fee_config()
+    if body.amount_usd < config["min_withdrawal_usd"]:
+        raise HTTPException(400, f"Minimum withdrawal is ${config['min_withdrawal_usd']:.2f}")
+    now = now_utc().isoformat()
+    available_credits = await db.wallet_credits.find(
+        {"user_id": user["id"], "withdrawn": False, "withdrawable_after": {"$lte": now}}
+    ).to_list(1000)
+    available = sum(c["amount"] for c in available_credits)
+    if body.amount_usd > available:
+        raise HTTPException(400, f"Insufficient available balance. Available: ${available:.2f}")
+    fee = round(body.amount_usd * config["seller_withdrawal_fee_rate"], 2)
+    payout_usd = round(body.amount_usd - fee, 2)
+    rates = await get_exchange_rates()
+    ngn_rate = rates.get("NGN", 1550.0)
+    payout_ngn = round(payout_usd * ngn_rate, 2)
+    wid = str(uuid.uuid4())
+    # Mark credits as withdrawn (FIFO)
+    remaining = body.amount_usd
+    for credit in sorted(available_credits, key=lambda c: c["withdrawable_after"]):
+        if remaining <= 0:
+            break
+        use = min(credit["amount"], remaining)
+        if use >= credit["amount"]:
+            await db.wallet_credits.update_one({"id": credit["id"]}, {"$set": {"withdrawn": True}})
+        else:
+            await db.wallet_credits.update_one({"id": credit["id"]}, {"$inc": {"amount": -use}})
+        remaining -= use
+    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -body.amount_usd}})
+    await db.withdrawals.insert_one({
+        "id": wid, "user_id": user["id"], "username": user["username"],
+        "amount_usd": body.amount_usd, "platform_fee_usd": fee,
+        "payout_usd": payout_usd, "payout_ngn": payout_ngn, "ngn_rate": ngn_rate,
+        "bank_code": body.bank_code, "bank_name": body.bank_name,
+        "account_number": body.account_number, "account_name": body.account_name,
+        "status": "pending", "created_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
+    })
+    await audit("wallet.withdraw_request", user["id"], wid, {"amount_usd": body.amount_usd})
+    return {"ok": True, "id": wid, "payout_usd": payout_usd, "payout_ngn": payout_ngn}
+
+@api.get("/wallet/withdrawals")
+async def my_withdrawals(user: dict = Depends(get_current_user)):
+    return await db.withdrawals.find({"user_id": user["id"]}, {"_id": 0}).sort([("created_at", -1)]).to_list(100)
+
+@api.post("/admin/withdrawals/{wid}/approve")
+async def admin_approve_withdrawal(wid: str, admin: dict = Depends(require_admin)):
+    w = await db.withdrawals.find_one({"id": wid})
+    if not w:
+        raise HTTPException(404, "Withdrawal not found")
+    if w["status"] != "pending":
+        raise HTTPException(400, "Already processed")
+    if not FLW_SECRET_KEY:
+        raise HTTPException(503, "Payment service not configured")
+    ref = f"lootra-{wid[:8]}-{int(now_utc().timestamp())}"
+    async with httpx.AsyncClient(timeout=30) as cl:
+        r = await cl.post(
+            "https://api.flutterwave.com/v3/transfers",
+            headers={"Authorization": f"Bearer {FLW_SECRET_KEY}", "Content-Type": "application/json"},
+            json={
+                "account_bank": w["bank_code"], "account_number": w["account_number"],
+                "amount": w["payout_ngn"], "narration": f"Lootra withdrawal #{wid[:8]}",
+                "currency": "NGN", "reference": ref,
+            },
+        )
+    data = r.json()
+    if data.get("status") != "success":
+        raise HTTPException(502, f"Transfer failed: {data.get('message', 'Unknown error')}")
+    await db.withdrawals.update_one({"id": wid}, {"$set": {
+        "status": "approved", "flw_reference": ref, "flw_transfer_id": data.get("data", {}).get("id"),
+        "approved_by": admin["id"], "approved_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
+    }})
+    await audit("wallet.withdrawal_approved", admin["id"], wid, {"payout_ngn": w["payout_ngn"]})
+    return {"ok": True}
+
+@api.post("/admin/withdrawals/{wid}/reject")
+async def admin_reject_withdrawal(wid: str, body: WithdrawalRejectIn, admin: dict = Depends(require_admin)):
+    w = await db.withdrawals.find_one({"id": wid})
+    if not w:
+        raise HTTPException(404, "Withdrawal not found")
+    if w["status"] != "pending":
+        raise HTTPException(400, "Already processed")
+    await db.users.update_one({"id": w["user_id"]}, {"$inc": {"balance": w["amount_usd"]}})
+    await db.wallet_credits.insert_one({
+        "id": str(uuid.uuid4()), "user_id": w["user_id"], "order_id": None,
+        "amount": w["amount_usd"], "withdrawable_after": now_utc().isoformat(),
+        "withdrawn": False, "created_at": now_utc().isoformat(), "source": "withdrawal_refund",
+    })
+    await db.withdrawals.update_one({"id": wid}, {"$set": {
+        "status": "rejected", "reject_reason": body.reason,
+        "rejected_by": admin["id"], "rejected_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
+    }})
+    await audit("wallet.withdrawal_rejected", admin["id"], wid, {"reason": body.reason})
+    return {"ok": True}
+
+@api.get("/admin/withdrawals")
+async def admin_withdrawals(status: Optional[str] = None, _: dict = Depends(require_admin)):
+    flt = {}
+    if status:
+        flt["status"] = status
+    return await db.withdrawals.find(flt, {"_id": 0}).sort([("created_at", -1)]).to_list(200)
+
+@api.get("/admin/config")
+async def get_config(_: dict = Depends(require_admin)):
+    config = await db.config.find_one({"key": "fees"}, {"_id": 0})
+    if not config:
+        return {"key": "fees", "buyer_fee_rate": 0.05, "seller_withdrawal_fee_rate": 0.05, "min_withdrawal_usd": 0.80, "hold_hours": 4}
+    return config
+
+@api.put("/admin/config")
+async def update_config(body: FeeConfigIn, admin: dict = Depends(require_admin)):
+    update = {
+        "buyer_fee_rate": body.buyer_fee_rate, "seller_withdrawal_fee_rate": body.seller_withdrawal_fee_rate,
+        "min_withdrawal_usd": body.min_withdrawal_usd, "hold_hours": body.hold_hours,
+        "updated_at": now_utc().isoformat(), "updated_by": admin["id"],
+    }
+    await db.config.update_one({"key": "fees"}, {"$set": update}, upsert=True)
+    await audit("admin.config_update", admin["id"], "fees", update)
+    return {"ok": True}
 
 # ---------------- Admin ----------------
 @api.get("/admin/stats")
