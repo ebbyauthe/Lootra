@@ -92,7 +92,7 @@ export default function AdminDashboard() {
     finally { setSettling(false); }
   };
 
-  const pendingWithdrawals = withdrawals.filter(w => w.status === "pending");
+  const pendingWithdrawals = withdrawals.filter(w => ["pending", "processing", "failed"].includes(w.status));
 
   const TABS = [
     { id: "pending", label: "Pending", count: pending.length },
