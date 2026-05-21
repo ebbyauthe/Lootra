@@ -1,23 +1,79 @@
 import React, { useState, useEffect } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { Wallet, CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle } from "lucide-react";
+import { CreditCard, Bitcoin, Copy, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
 
 const CRYPTO_OPTIONS = [
-  { code: "btc",  label: "Bitcoin",  symbol: "BTC" },
-  { code: "eth",  label: "Ethereum", symbol: "ETH" },
-  { code: "usdt", label: "USDT",     symbol: "USDT (TRC20 / ERC20)" },
-  { code: "usdc", label: "USDC",     symbol: "USDC" },
-  { code: "ltc",  label: "Litecoin", symbol: "LTC" },
-  { code: "sol",  label: "Solana",   symbol: "SOL" },
+  { code: "btc",  label: "Bitcoin",   ticker: "BTC",  network: "Bitcoin Network", dot: "#F7931A" },
+  { code: "eth",  label: "Ethereum",  ticker: "ETH",  network: "ERC20",           dot: "#627EEA" },
+  { code: "usdt", label: "Tether",    ticker: "USDT", network: "TRC20",           dot: "#26A17B" },
+  { code: "usdc", label: "USD Coin",  ticker: "USDC", network: "ERC20",           dot: "#2775CA" },
+  { code: "ltc",  label: "Litecoin",  ticker: "LTC",  network: "Litecoin",        dot: "#345D9D" },
+  { code: "sol",  label: "Solana",    ticker: "SOL",  network: "Solana",          dot: "#9945FF" },
 ];
 
-function FiatTab({ onRefresh }) {
-  const { user } = useAuth();
-  const { currency, rates, formatPrice } = useCurrency();
+const STATUS_META = {
+  waiting:        { text: "Waiting for payment",   step: 1, color: "text-[#FFB020]", dot: "#FFB020" },
+  confirming:     { text: "Confirming on-chain",   step: 2, color: "text-blue-400",  dot: "#60A5FA" },
+  confirmed:      { text: "Confirmed",             step: 2, color: "text-blue-400",  dot: "#60A5FA" },
+  sending:        { text: "Processing",            step: 2, color: "text-blue-400",  dot: "#60A5FA" },
+  partially_paid: { text: "Partially paid",        step: 1, color: "text-[#FFB020]", dot: "#FFB020" },
+  finished:       { text: "Credited to wallet",    step: 3, color: "text-[#CCFF00]", dot: "#CCFF00" },
+  failed:         { text: "Payment failed",        step: 0, color: "text-[#FF453A]", dot: "#FF453A" },
+  expired:        { text: "Payment expired",       step: 0, color: "text-[#FF453A]", dot: "#FF453A" },
+};
 
+function useCountdown(expiresAt) {
+  const [secs, setSecs] = useState(null);
+  useEffect(() => {
+    if (!expiresAt) return;
+    const tick = () => setSecs(Math.max(0, Math.floor((new Date(expiresAt) - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+  if (secs === null) return null;
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function StepBar({ step }) {
+  const steps = ["Send", "Confirming", "Credited"];
+  return (
+    <div className="flex items-start gap-0">
+      {steps.map((label, i) => {
+        const idx = i + 1;
+        const done = step > idx;
+        const active = step === idx;
+        return (
+          <React.Fragment key={label}>
+            <div className="flex flex-col items-center gap-1.5 shrink-0">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-mono font-bold border-2 transition-all ${
+                done    ? "bg-[#CCFF00] border-[#CCFF00] text-black" :
+                active  ? "border-[#CCFF00] text-[#CCFF00] bg-[#CCFF00]/10" :
+                          "border-[#333] text-neutral-600"
+              }`}>
+                {done ? <CheckCircle className="w-4 h-4" /> : idx}
+              </div>
+              <span className={`text-[9px] font-mono uppercase tracking-wider whitespace-nowrap ${
+                active ? "text-[#CCFF00]" : done ? "text-neutral-400" : "text-neutral-600"
+              }`}>{label}</span>
+            </div>
+            {i < 2 && (
+              <div className={`flex-1 h-px mt-4 mx-1 transition-colors ${done ? "bg-[#CCFF00]" : "bg-[#2A2A2A]"}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function FiatTab() {
+  const { currency, rates } = useCurrency();
   const [amount, setAmount] = useState("");
   const [selectedCurrency, setSelectedCurrency] = useState(currency);
   const [busy, setBusy] = useState(false);
@@ -107,36 +163,11 @@ function FiatTab({ onRefresh }) {
         data-testid="fiat-pay-btn"
       >
         {busy ? "Creating payment…" : amount
-          ? `Pay ${CURRENCIES.find(c=>c.code===selectedCurrency)?.symbol}${amount} · Flutterwave`
+          ? `Pay ${CURRENCIES.find(c => c.code === selectedCurrency)?.symbol}${amount} · Flutterwave`
           : "Continue to payment"}
       </button>
     </div>
   );
-}
-
-const STATUS_LABEL = {
-  waiting:       { text: "Waiting for payment",     color: "text-[#FFB020]" },
-  confirming:    { text: "Confirming on-chain…",    color: "text-blue-400" },
-  confirmed:     { text: "Confirmed",               color: "text-[#CCFF00]" },
-  sending:       { text: "Processing…",             color: "text-[#CCFF00]" },
-  partially_paid:{ text: "Partially paid",          color: "text-[#FFB020]" },
-  finished:      { text: "Credited to wallet ✓",   color: "text-[#CCFF00]" },
-  failed:        { text: "Payment failed",          color: "text-[#FF453A]" },
-  expired:       { text: "Payment expired",         color: "text-[#FF453A]" },
-};
-
-function useCountdown(expiresAt) {
-  const [secs, setSecs] = useState(null);
-  useEffect(() => {
-    if (!expiresAt) return;
-    const tick = () => setSecs(Math.max(0, Math.floor((new Date(expiresAt) - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [expiresAt]);
-  if (secs === null) return null;
-  const m = Math.floor(secs / 60), s = secs % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function CryptoTab() {
@@ -145,23 +176,39 @@ function CryptoTab() {
   const [payCurrency, setPayCurrency] = useState("btc");
   const [busy, setBusy] = useState(false);
   const [payment, setPayment] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedAddr, setCopiedAddr] = useState(false);
+  const [copiedAmt, setCopiedAmt] = useState(false);
   const [status, setStatus] = useState("waiting");
   const [credited, setCredited] = useState(false);
+  const [nextPoll, setNextPoll] = useState(30);
   const countdown = useCountdown(payment?.expires_at);
 
   useEffect(() => {
     if (!payment?.payment_id || credited) return;
+    let pollSecs = 30;
+
     const poll = async () => {
       try {
         const { data } = await api.get(`/wallet/crypto-status/${payment.payment_id}`);
         setStatus(data.status);
-        if (data.credited) { setCredited(true); refresh(); toast.success("Wallet credited!"); }
+        if (data.credited) {
+          setCredited(true);
+          refresh();
+          toast.success("Wallet credited!");
+        }
       } catch {}
+      pollSecs = 30;
+      setNextPoll(30);
     };
+
     poll();
-    const id = setInterval(poll, 30000);
-    return () => clearInterval(id);
+    const pollId = setInterval(poll, 30000);
+    const countId = setInterval(() => {
+      pollSecs = Math.max(0, pollSecs - 1);
+      setNextPoll(pollSecs);
+    }, 1000);
+
+    return () => { clearInterval(pollId); clearInterval(countId); };
   }, [payment?.payment_id, credited, refresh]);
 
   const generate = async () => {
@@ -175,6 +222,7 @@ function CryptoTab() {
       setPayment(data);
       setStatus("waiting");
       setCredited(false);
+      setNextPoll(30);
     } catch (e) {
       toast.error(formatError(e));
     } finally {
@@ -182,59 +230,127 @@ function CryptoTab() {
     }
   };
 
-  const copy = (text) => {
+  const copy = (text, which) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    toast.success("Address copied");
+    if (which === "addr") { setCopiedAddr(true); setTimeout(() => setCopiedAddr(false), 2000); }
+    if (which === "amt")  { setCopiedAmt(true);  setTimeout(() => setCopiedAmt(false),  2000); }
+    toast.success("Copied!");
   };
 
+  const coin = CRYPTO_OPTIONS.find((c) => c.code === payCurrency);
+  const payCoin = payment ? CRYPTO_OPTIONS.find((c) => c.code === payment.pay_currency) || coin : null;
+  const statusMeta = STATUS_META[status] || STATUS_META.waiting;
+  const step = credited ? 3 : statusMeta.step;
+  const isError = !credited && (status === "failed" || status === "expired");
+
   if (payment) {
-    const s = STATUS_LABEL[status] || STATUS_LABEL.waiting;
     return (
-      <div className="space-y-5">
-        <div className="lootra-card p-5 space-y-4">
-          <div className="text-center">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Send exactly</div>
-            <div className="font-mono text-2xl text-[#CCFF00] mt-1">
-              {payment.pay_amount} {payment.pay_currency?.toUpperCase()}
-            </div>
-            <div className="text-xs text-neutral-400 font-mono mt-1">≈ ${amountUSD} USD</div>
-          </div>
+      <div className="space-y-4">
+        <StepBar step={step} />
 
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-2">Payment address</div>
-            <div className="flex items-center gap-2 bg-[#111] border border-[#2A2A2A] px-3 py-2">
-              <span className="font-mono text-xs text-neutral-300 break-all flex-1">{payment.pay_address}</span>
-              <button onClick={() => copy(payment.pay_address)} className="shrink-0 text-neutral-400 hover:text-[#CCFF00] transition-colors">
-                {copied ? <CheckCircle className="w-4 h-4 text-[#CCFF00]" /> : <Copy className="w-4 h-4" />}
-              </button>
+        {credited ? (
+          <div className="lootra-card p-8 flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-full bg-[#CCFF00]/10 border-2 border-[#CCFF00] flex items-center justify-center">
+              <CheckCircle className="w-8 h-8 text-[#CCFF00]" />
+            </div>
+            <div>
+              <div className="text-xl font-medium text-white">Payment received!</div>
+              <div className="text-sm text-neutral-400 mt-1">${amountUSD} USD has been added to your wallet.</div>
             </div>
           </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-mono ${s.color}`}>{s.text}</span>
-              {!credited && status !== "failed" && status !== "expired" && (
-                <span className="inline-block w-2 h-2 rounded-full bg-current animate-pulse" style={{color: "inherit"}} />
-              )}
+        ) : isError ? (
+          <div className="lootra-card p-8 flex flex-col items-center gap-4 text-center">
+            <AlertCircle className="w-12 h-12 text-[#FF453A]" />
+            <div>
+              <div className={`text-sm font-mono font-medium ${statusMeta.color}`}>{statusMeta.text}</div>
+              <div className="text-xs text-neutral-500 mt-1">This payment address is no longer valid.</div>
             </div>
-            {countdown !== null && !credited && status !== "expired" && (
-              <span className="text-[10px] font-mono text-neutral-500">Expires in {countdown}</span>
-            )}
+            <button onClick={() => setPayment(null)} className="lootra-btn-secondary inline-flex items-center gap-2">
+              <RefreshCw className="w-4 h-4" /> Try again
+            </button>
           </div>
-
-          {!credited && (
-            <div className="flex items-start gap-2 text-xs text-neutral-400">
-              <AlertCircle className="w-4 h-4 text-[#FFB020] shrink-0 mt-0.5" />
-              <span>Send the exact amount shown. Status updates automatically every 30 seconds. Your wallet will be credited once confirmed on-chain (usually 10–30 min).</span>
+        ) : (
+          <div className="lootra-card overflow-hidden">
+            {/* QR + coin header */}
+            <div className="p-5 flex flex-col items-center gap-4 border-b border-[#2A2A2A]">
+              <div className="p-3 bg-white rounded-xl shadow-lg">
+                <QRCodeSVG
+                  value={payment.pay_address}
+                  size={160}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="M"
+                />
+              </div>
+              <div className="flex items-center gap-2 px-3 py-1.5 border border-[#2A2A2A] rounded-full">
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: payCoin?.dot }} />
+                <span className="text-xs font-mono text-neutral-300">
+                  {payment.pay_currency?.toUpperCase()} · {payCoin?.network}
+                </span>
+              </div>
             </div>
-          )}
-        </div>
 
-        {!credited && (
-          <button onClick={() => setPayment(null)} className="lootra-btn-secondary w-full">
-            Generate a new payment
+            <div className="p-5 space-y-4">
+              {/* Amount to send */}
+              <div className="text-center">
+                <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-2">Send exactly</div>
+                <button
+                  onClick={() => copy(String(payment.pay_amount), "amt")}
+                  className="group inline-flex items-center gap-2 hover:opacity-80 transition-opacity"
+                >
+                  <span className="font-mono text-3xl font-bold text-[#CCFF00]">{payment.pay_amount}</span>
+                  <span className="font-mono text-lg text-neutral-400">{payment.pay_currency?.toUpperCase()}</span>
+                  <span className="text-neutral-600 group-hover:text-neutral-300 transition-colors ml-1">
+                    {copiedAmt ? <CheckCircle className="w-4 h-4 text-[#CCFF00]" /> : <Copy className="w-4 h-4" />}
+                  </span>
+                </button>
+                <div className="text-xs text-neutral-500 font-mono mt-1">≈ ${amountUSD} USD</div>
+              </div>
+
+              {/* Address */}
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-2">Wallet address</div>
+                <button
+                  onClick={() => copy(payment.pay_address, "addr")}
+                  className="w-full flex items-center gap-3 bg-[#0A0A0A] border border-[#2A2A2A] hover:border-neutral-500 transition-colors px-3 py-3 text-left group"
+                >
+                  <span className="font-mono text-xs text-neutral-300 break-all flex-1 leading-relaxed">
+                    {payment.pay_address}
+                  </span>
+                  <span className="shrink-0 text-neutral-500 group-hover:text-[#CCFF00] transition-colors">
+                    {copiedAddr ? <CheckCircle className="w-4 h-4 text-[#CCFF00]" /> : <Copy className="w-4 h-4" />}
+                  </span>
+                </button>
+              </div>
+
+              {/* Status + timer row */}
+              <div className="flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: statusMeta.dot }} />
+                  <span className={statusMeta.color}>{statusMeta.text}</span>
+                </div>
+                <div className="text-right space-y-0.5">
+                  {countdown && <div className="text-neutral-500">Expires {countdown}</div>}
+                  <div className="text-neutral-600 text-[10px]">Checking in {nextPoll}s</div>
+                </div>
+              </div>
+
+              {/* Network warning */}
+              <div className="flex items-start gap-2 p-3 bg-[#FFB020]/5 border border-[#FFB020]/20 rounded text-xs text-neutral-400">
+                <AlertCircle className="w-4 h-4 text-[#FFB020] shrink-0 mt-0.5" />
+                <span>
+                  Send <strong className="text-white">only {payment.pay_currency?.toUpperCase()}</strong> on the{" "}
+                  <strong className="text-white">{payCoin?.network}</strong> network.
+                  {" "}Sending on the wrong network will result in permanent loss of funds.
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!credited && !isError && (
+          <button onClick={() => setPayment(null)} className="lootra-btn-secondary w-full text-sm">
+            ← Generate new payment
           </button>
         )}
       </div>
@@ -248,17 +364,18 @@ function CryptoTab() {
           Amount (USD)
         </label>
         <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-neutral-400 text-sm">$</span>
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono text-neutral-400 text-xl">$</span>
           <input
             type="number"
             min="1"
             step="1"
             value={amountUSD}
             onChange={(e) => setAmountUSD(e.target.value)}
-            placeholder="0.00"
-            className="w-full bg-transparent border border-[#2A2A2A] pl-8 pr-3 py-3 font-mono text-sm focus:outline-none focus:border-[#CCFF00] transition-colors"
+            placeholder="0"
+            className="w-full bg-transparent border border-[#2A2A2A] pl-10 pr-3 py-4 font-mono text-2xl focus:outline-none focus:border-[#CCFF00] transition-colors"
           />
         </div>
+        <p className="text-[11px] text-neutral-600 font-mono mt-1.5">Minimum $1 · Credited as USD equivalent</p>
       </div>
 
       <div>
@@ -270,29 +387,33 @@ function CryptoTab() {
             <button
               key={c.code}
               onClick={() => setPayCurrency(c.code)}
-              className={`flex flex-col items-start gap-0.5 p-3 border text-xs font-mono transition-colors ${
+              className={`flex items-center gap-3 p-3 border text-left transition-colors ${
                 payCurrency === c.code
-                  ? "border-[#CCFF00] text-[#CCFF00] bg-[#CCFF00]/5"
-                  : "border-[#2A2A2A] text-neutral-400 hover:border-neutral-500 hover:text-white"
+                  ? "border-[#CCFF00] bg-[#CCFF00]/5"
+                  : "border-[#2A2A2A] hover:border-neutral-600"
               }`}
             >
-              <span className="font-medium">{c.label}</span>
-              <span className="text-[10px] text-neutral-500">{c.code.toUpperCase()}</span>
+              <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: c.dot }} />
+              <div className="min-w-0">
+                <div className={`text-xs font-mono font-semibold truncate ${payCurrency === c.code ? "text-[#CCFF00]" : "text-white"}`}>
+                  {c.ticker}
+                </div>
+                <div className="text-[10px] font-mono text-neutral-500 truncate">{c.network}</div>
+              </div>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="lootra-card p-4 space-y-2">
-        <div className="flex items-center gap-2 text-xs text-neutral-400">
-          <CheckCircle className="w-4 h-4 text-[#CCFF00] shrink-0" />
-          <span>Powered by NOWPayments — self-custodial, non-KYC</span>
+      {coin && (
+        <div className="flex items-center gap-2.5 px-3 py-2.5 border border-[#2A2A2A] bg-[#0A0A0A]">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: coin.dot }} />
+          <span className="text-xs font-mono text-neutral-400">
+            Paying with <span className="text-white">{coin.label} ({coin.ticker})</span> on the{" "}
+            <span className="text-white">{coin.network}</span> network
+          </span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-neutral-400">
-          <CheckCircle className="w-4 h-4 text-[#CCFF00] shrink-0" />
-          <span>Wallet credited in USD equivalent once confirmed on-chain</span>
-        </div>
-      </div>
+      )}
 
       <button
         onClick={generate}
@@ -300,8 +421,12 @@ function CryptoTab() {
         className="lootra-btn-primary w-full"
         data-testid="crypto-generate-btn"
       >
-        {busy ? "Generating address…" : "Get payment address"}
+        {busy ? "Generating address…" : `Get ${coin?.ticker || "crypto"} address →`}
       </button>
+
+      <p className="text-center text-[10px] font-mono text-neutral-600">
+        Powered by NOWPayments · Non-custodial · No KYC
+      </p>
     </div>
   );
 }
