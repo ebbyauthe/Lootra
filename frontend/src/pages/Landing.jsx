@@ -169,7 +169,7 @@ export default function Landing() {
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featured.map((l) => <ListingCard key={l.id} listing={l} />)}
+            {featured.map((l) => <ListingCard key={l.id} listing={l} onClickOverride={!user ? () => nav("/register") : null} />)}
           </div>
         )}
       </section>
