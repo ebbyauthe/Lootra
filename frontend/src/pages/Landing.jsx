@@ -82,7 +82,7 @@ export default function Landing() {
               Browse thousands of verified accounts or list your own — protected by escrow every step of the way.
             </p>
             <div className="space-y-3 pt-2">
-              <Link to="/browse" className="lootra-btn-primary inline-flex items-center gap-2 w-full justify-center" data-testid="hero-browse-btn">
+              <Link to="/browse" onClick={go("/browse")} className="lootra-btn-primary inline-flex items-center gap-2 w-full justify-center" data-testid="hero-browse-btn">
                 Browse marketplace <ArrowRight className="w-4 h-4" />
               </Link>
               <Link to="/sell" onClick={go("/sell")} className="lootra-btn-secondary inline-flex items-center gap-2 w-full justify-center" data-testid="hero-sell-btn">
@@ -109,7 +109,7 @@ export default function Landing() {
             <Link
               key={game.id}
               to={`/browse?game=${game.id}`}
-              onClick={undefined}
+              onClick={go(`/browse?game=${game.id}`)}
               className="lootra-card group overflow-hidden block"
             >
               <div className="relative overflow-hidden">
@@ -161,7 +161,7 @@ export default function Landing() {
             <div className="lootra-badge inline-block mb-3">LIVE LISTINGS</div>
             <h2 className="text-2xl md:text-3xl font-medium tracking-tight">Recently dropped</h2>
           </div>
-          <Link to="/browse" className="text-sm text-[#CCFF00] hover:underline" data-testid="view-all-link">View all →</Link>
+          <Link to="/browse" onClick={go("/browse")} className="text-sm text-[#CCFF00] hover:underline" data-testid="view-all-link">View all →</Link>
         </div>
         {featured.length === 0 ? (
           <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-sm text-neutral-500 font-mono">
@@ -169,7 +169,7 @@ export default function Landing() {
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featured.map((l) => <ListingCard key={l.id} listing={l} />)}
+            {featured.map((l) => <ListingCard key={l.id} listing={l} onClickOverride={!user ? () => nav("/register") : null} />)}
           </div>
         )}
       </section>
