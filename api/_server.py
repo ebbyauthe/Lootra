@@ -816,6 +816,7 @@ async def crypto_topup(data: TopupCryptoIn, user: dict = Depends(get_current_use
         "pay_currency": data.pay_currency.lower(),
         "order_id": order_id,
         "order_description": "Lootra wallet top-up",
+        "ipn_callback_url": "https://lootra.onrender.com/api/webhooks/nowpayments",
     }
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
