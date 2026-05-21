@@ -36,6 +36,11 @@ export default function AdminDashboard() {
   const reject = async (id) => { try { await api.post(`/admin/listings/${id}/reject`); toast.success("Rejected"); load(); } catch (e) { toast.error(formatError(e)); } };
   const refund = async (id) => { try { await api.post(`/admin/orders/${id}/refund`); toast.success("Refunded"); load(); } catch (e) { toast.error(formatError(e)); } };
   const ban = async (id) => { try { await api.post(`/admin/users/${id}/ban`); toast.success("User banned"); load(); } catch (e) { toast.error(formatError(e)); } };
+  const resetBalances = async () => {
+    if (!window.confirm("Reset ALL user balances to $0? This cannot be undone.")) return;
+    try { const { data } = await api.post("/admin/reset-test-balances"); toast.success(`Balances reset — ${data.affected} users updated`); load(); }
+    catch (e) { toast.error(formatError(e)); }
+  };
   const peekVault = async (id) => {
     try { const { data } = await api.get(`/admin/vault/${id}`); setVault({ id, ...data }); }
     catch (e) { toast.error(formatError(e)); }
@@ -56,7 +61,10 @@ export default function AdminDashboard() {
           <div className="lootra-badge lootra-badge-accent inline-block mb-3">ADMIN</div>
           <h1 className="text-3xl md:text-4xl font-medium tracking-tight">Operations</h1>
         </div>
-        <button onClick={load} className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="admin-refresh"><RefreshCw className="w-4 h-4" /> Refresh</button>
+        <div className="flex gap-2">
+          <button onClick={resetBalances} className="lootra-btn-secondary inline-flex items-center gap-2 !border-[#FF453A] !text-[#FF453A]">Reset all balances to $0</button>
+          <button onClick={load} className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="admin-refresh"><RefreshCw className="w-4 h-4" /> Refresh</button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" data-testid="admin-stats">
