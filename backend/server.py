@@ -1153,14 +1153,22 @@ async def verify_account(body: VerifyAccountIn, _: dict = Depends(get_current_us
                 params={"account_number": body.account_number, "account_bank": body.bank_code},
                 headers={"Authorization": f"Bearer {FLW_SECRET_KEY}"},
             )
+        log.info(f"FLW resolve status={r.status_code} body={r.text[:300]}")
+        if r.status_code == 401:
+            raise HTTPException(503, "Payment service authentication failed — check FLW_SECRET_KEY")
+        if not r.text.strip():
+            raise HTTPException(502, "Empty response from Flutterwave — try again")
         data = r.json()
+    except HTTPException:
+        raise
     except httpx.TimeoutException:
         raise HTTPException(504, "Flutterwave timed out — please try again")
     except Exception as e:
         log.error(f"verify_account error: {e}")
         raise HTTPException(502, "Could not reach payment service — please try again")
     if data.get("status") != "success":
-        raise HTTPException(400, "Could not verify account. Check the account number and bank.")
+        msg = data.get("message") or "Could not verify account. Check the account number and bank."
+        raise HTTPException(400, msg)
     return {"account_name": data["data"]["account_name"]}
 
 @api.get("/wallet/balance")
