@@ -3,7 +3,6 @@
   "builds": [
     { "src": "api/index.py", "use": "@vercel/python" }
   ],
-  "outputDirectory": "public",
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/index.py" },
     { "handle": "filesystem" },
