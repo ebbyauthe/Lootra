@@ -1,21 +1,39 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Mail } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { api, formatError } from "../lib/api";
 
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
   const [busy, setBusy] = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
+    setUnverified(false);
     const r = await login(form.email, form.password);
     setBusy(false);
     if (r.ok) { toast.success("Welcome back"); nav("/dashboard"); }
+    else if (r.error === "EMAIL_NOT_VERIFIED") { setUnverified(true); }
     else toast.error(r.error);
+  };
+
+  const resendVerification = async () => {
+    setResending(true);
+    try {
+      await api.post("/auth/resend-verification", { email: form.email });
+      toast.success("Verification email sent — check your inbox");
+    } catch (err) {
+      toast.error(formatError(err));
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
@@ -38,6 +56,20 @@ export default function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
+
+      {unverified && (
+        <div className="mt-4 p-4 border border-[#FFB020]/30 bg-[#FFB020]/5 flex items-start gap-3">
+          <Mail className="w-4 h-4 text-[#FFB020] shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <div className="text-[#FFB020] font-medium">Email not verified</div>
+            <div className="text-neutral-400 text-xs mt-0.5">Check your inbox for the verification link.</div>
+            <button onClick={resendVerification} disabled={resending} className="text-[#CCFF00] hover:underline text-xs mt-1.5">
+              {resending ? "Sending…" : "Resend verification email"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between text-sm mt-6">
         <span className="text-neutral-500">New to Lootra? <Link to="/register" className="text-[#CCFF00] hover:underline">Create an account</Link></span>
         <Link to="/forgot-password" className="text-neutral-500 hover:text-white transition-colors">Forgot password?</Link>

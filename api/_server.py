@@ -10,6 +10,10 @@ import logging
 import secrets
 import hashlib
 import hmac as _hmac
+import smtplib
+import asyncio
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
@@ -34,8 +38,11 @@ FLW_WEBHOOK_HASH = os.environ.get("FLW_WEBHOOK_HASH", "")
 NOWPAYMENTS_API_KEY = os.environ.get("NOWPAYMENTS_API_KEY", "")
 NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "noreply@lootra.com")
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER)
 SUPPORTED_CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS"]
 FALLBACK_RATES = {"USD": 1.0, "CAD": 1.37, "GBP": 0.79, "EUR": 0.92, "NGN": 1550.0, "GHS": 15.5}
 _rates_cache: dict = {"rates": dict(FALLBACK_RATES), "updated_at": None}
@@ -311,12 +318,17 @@ async def register(data: RegisterIn, response: Response):
         "is_verified_seller": False,
         "created_at": now_utc().isoformat(),
     }
+    doc["email_verified"] = False
     await db.users.insert_one(doc)
-    access = make_access_token(uid, email, "user")
-    refresh = make_refresh_token(uid)
-    set_auth_cookies(response, access, refresh)
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    await db.email_verifications.insert_one({"user_id": uid, "token": token, "expires_at": expires})
     await audit("register", uid, "user", {"email": email})
-    return {"user": sanitize_user(doc), "token": access}
+    try:
+        await send_verification_email(email, token)
+    except Exception:
+        pass
+    return {"verify": True}
 
 @api.post("/auth/login")
 async def login(data: LoginIn, request: Request, response: Response):
@@ -336,6 +348,8 @@ async def login(data: LoginIn, request: Request, response: Response):
         await db.login_attempts.update_one({"identifier": key}, {"$set": update}, upsert=True)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await db.login_attempts.delete_one({"identifier": key})
+    if not user.get("email_verified", True):
+        raise HTTPException(status_code=403, detail="EMAIL_NOT_VERIFIED")
     access = make_access_token(user["id"], user["email"], user.get("role", "user"))
     refresh = make_refresh_token(user["id"])
     set_auth_cookies(response, access, refresh)
@@ -348,27 +362,48 @@ class ResetPasswordIn(BaseModel):
     token: str
     password: str = Field(min_length=8)
 
+def _email_html(title: str, body_html: str) -> str:
+    return f"""<div style="font-family:monospace;max-width:480px;margin:0 auto;padding:32px;background:#0A0A0A;color:#fff;border:1px solid #2A2A2A">
+  <div style="color:#CCFF00;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">LOOTRA</div>
+  <h2 style="font-size:20px;font-weight:500;margin:0 0 12px">{title}</h2>
+  {body_html}
+  <p style="color:#555;font-size:11px;margin:24px 0 0">If you didn't request this, ignore this email.</p>
+</div>"""
+
+async def send_email(to: str, subject: str, html: str):
+    if not SMTP_USER or not SMTP_PASS:
+        raise HTTPException(503, "Email service not configured — add SMTP_USER and SMTP_PASS to environment")
+    def _send():
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_FROM or SMTP_USER
+        msg["To"] = to
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+            s.ehlo()
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(msg["From"], [to], msg.as_string())
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, _send)
+    except Exception as e:
+        log.error(f"Email send failed: {e}")
+        raise HTTPException(502, "Failed to send email — check SMTP credentials")
+
+async def send_verification_email(to_email: str, token: str):
+    url = f"{FRONTEND_URL}/verify-email?token={token}"
+    html = _email_html("Verify your email", f"""
+  <p style="color:#999;font-size:13px;margin:0 0 24px">Click below to verify your email address and activate your account.</p>
+  <a href="{url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600">Verify email</a>
+  <p style="color:#555;font-size:11px;margin:16px 0 0">Link expires in 24 hours.</p>""")
+    await send_email(to_email, "Verify your Lootra account", html)
+
 async def send_reset_email(to_email: str, token: str):
-    if not RESEND_API_KEY:
-        raise HTTPException(503, "Email service not configured")
-    reset_url = f"{FRONTEND_URL}/reset-password?token={token}"
-    html = f"""
-    <div style="font-family:monospace;max-width:480px;margin:0 auto;padding:32px;background:#0A0A0A;color:#fff;border:1px solid #2A2A2A">
-      <div style="color:#CCFF00;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">LOOTRA</div>
-      <h2 style="font-size:20px;font-weight:500;margin:0 0 12px">Reset your password</h2>
-      <p style="color:#999;font-size:13px;margin:0 0 24px">Click the button below to set a new password. This link expires in 1 hour.</p>
-      <a href="{reset_url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600">Reset password</a>
-      <p style="color:#555;font-size:11px;margin:24px 0 0">If you didn't request this, ignore this email. Your password won't change.</p>
-    </div>
-    """
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-            json={"from": EMAIL_FROM, "to": [to_email], "subject": "Reset your Lootra password", "html": html},
-        )
-    if r.status_code >= 400:
-        raise HTTPException(502, "Failed to send reset email")
+    url = f"{FRONTEND_URL}/reset-password?token={token}"
+    html = _email_html("Reset your password", f"""
+  <p style="color:#999;font-size:13px;margin:0 0 24px">Click below to set a new password. This link expires in 1 hour.</p>
+  <a href="{url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600">Reset password</a>""")
+    await send_email(to_email, "Reset your Lootra password", html)
 
 @api.post("/auth/forgot-password")
 async def forgot_password(data: ForgotPasswordIn):
@@ -394,6 +429,30 @@ async def reset_password(data: ResetPasswordIn):
     await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password": hashed}})
     await db.password_resets.delete_one({"token": data.token})
     await audit("auth.password_reset", rec["user_id"], "user", {})
+    return {"ok": True}
+
+@api.get("/auth/verify-email")
+async def verify_email(token: str):
+    rec = await db.email_verifications.find_one({"token": token})
+    if not rec:
+        raise HTTPException(400, "Invalid or expired verification link")
+    if rec["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        await db.email_verifications.delete_one({"token": token})
+        raise HTTPException(400, "Verification link has expired — request a new one")
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"email_verified": True}})
+    await db.email_verifications.delete_one({"token": token})
+    return {"ok": True}
+
+@api.post("/auth/resend-verification")
+async def resend_verification(data: ForgotPasswordIn):
+    user = await db.users.find_one({"email": data.email.lower()})
+    if not user or user.get("email_verified", True):
+        return {"ok": True}
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    await db.email_verifications.delete_many({"user_id": user["id"]})
+    await db.email_verifications.insert_one({"user_id": user["id"], "token": token, "expires_at": expires})
+    await send_verification_email(user["email"], token)
     return {"ok": True}
 
 @api.post("/auth/logout")
