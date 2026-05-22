@@ -1,9 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
+import { Turnstile } from "@marsidev/react-turnstile";
 import { useAuth } from "../context/AuthContext";
 import { api, formatError } from "../lib/api";
+
+const SITE_KEY = "0x4AAAAAADT-fceKK6DFxAM7";
 
 export default function Login() {
   const { login } = useAuth();
@@ -12,16 +15,29 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [unverified, setUnverified] = useState(false);
   const [resending, setResending] = useState(false);
+  const [token, setToken] = useState("");
+  const turnstileRef = useRef(null);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!token) {
+      toast.error("Please wait for the security check to complete.");
+      return;
+    }
     setBusy(true);
     setUnverified(false);
-    const r = await login(form.email, form.password);
+    const r = await login(form.email, form.password, token);
     setBusy(false);
     if (r.ok) { toast.success("Welcome back"); nav("/dashboard"); }
-    else if (r.error === "EMAIL_NOT_VERIFIED") { setUnverified(true); }
-    else toast.error(r.error);
+    else if (r.error === "EMAIL_NOT_VERIFIED") {
+      setUnverified(true);
+      turnstileRef.current?.reset();
+      setToken("");
+    } else {
+      toast.error(r.error);
+      turnstileRef.current?.reset();
+      setToken("");
+    }
   };
 
   const resendVerification = async () => {
@@ -52,7 +68,14 @@ export default function Login() {
           <input type="password" className="lootra-input" required value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="login-password" />
         </div>
-        <button type="submit" disabled={busy} className="lootra-btn-primary w-full" data-testid="login-submit">
+        <Turnstile
+          ref={turnstileRef}
+          siteKey={SITE_KEY}
+          onSuccess={setToken}
+          onExpire={() => setToken("")}
+          options={{ theme: "dark" }}
+        />
+        <button type="submit" disabled={busy || !token} className="lootra-btn-primary w-full" data-testid="login-submit">
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>

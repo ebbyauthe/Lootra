@@ -243,6 +243,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+    cf_token: str = ""
 
 class ListingCreate(BaseModel):
     title: str = Field(min_length=5, max_length=120)
@@ -474,8 +475,9 @@ async def register(data: RegisterIn, request: Request, response: Response):
 
 @api.post("/auth/login")
 async def login(data: LoginIn, request: Request, response: Response):
-    email = data.email.lower()
     ip = request.client.host if request.client else "unknown"
+    await _verify_turnstile(data.cf_token, ip)
+    email = data.email.lower()
     key = f"{ip}:{email}"
     rec = await db.login_attempts.find_one({"identifier": key})
     if rec and rec.get("locked_until") and datetime.fromisoformat(rec["locked_until"]) > now_utc():
