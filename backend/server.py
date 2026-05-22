@@ -276,10 +276,10 @@ class DisputeIn(BaseModel):
 
 class MessageIn(BaseModel):
     content: str = Field(default="", max_length=2000)
-    image: Optional[str] = None  # base64 data URL
+    image: Optional[str] = Field(default=None, max_length=1_400_000)  # ~1MB base64
 
 class ConfirmIn(BaseModel):
-    screenshot: Optional[str] = None  # base64 data URL
+    screenshot: Optional[str] = Field(default=None, max_length=1_400_000)  # ~1MB base64
 
 class ComplaintIn(BaseModel):
     reason: str = Field(min_length=10, max_length=1000)
@@ -390,6 +390,8 @@ async def startup():
     ]:
         if not await db.games.find_one({"id": g["id"]}):
             await db.games.insert_one(g)
+    if ADMIN_PASSWORD == "Admin@12345":
+        log.warning("ADMIN_PASSWORD is set to the default value — change it via the ADMIN_PASSWORD environment variable immediately.")
     import asyncio as _asyncio
     _asyncio.create_task(_order_scheduler())
 
@@ -572,6 +574,7 @@ async def verify_email(token: str):
 @api.post("/auth/resend-verification")
 async def resend_verification(data: ForgotPasswordIn, request: Request):
     ip = request.client.host if request.client else "unknown"
+    await _verify_turnstile(data.cf_token, ip)
     await _check_rate_limit(ip, "resend-verification", limit=5, window_minutes=60)
     user = await db.users.find_one({"email": data.email.lower()})
     if not user or user.get("email_verified", False):
@@ -944,8 +947,9 @@ async def admin_settle(order_id: str, body: SettleIn, admin: dict = Depends(requ
         await db.orders.update_one({"id": order_id}, {"$set": {
             "status": "REFUNDED", "timeline": timeline, "updated_at": now_utc().isoformat(),
         }})
-        await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": o["amount"]}})
-        await audit("order.admin_refund", admin["id"], order_id, {"amount": o["amount"]})
+        refund_amount = o.get("total_charged") or o["amount"]
+        await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": refund_amount}})
+        await audit("order.admin_refund", admin["id"], order_id, {"amount": refund_amount})
     return {"ok": True}
 
 @api.post("/orders/{order_id}/review")
@@ -1131,8 +1135,15 @@ async def fiat_verify(
     if float(tx.get("amount", 0)) < pending["amount"] * 0.99:
         raise HTTPException(400, "Amount mismatch")
     usd_amount = pending["usd_amount"]
+    # Atomically mark as credited — prevents double-credit if verify is called twice
+    claimed = await db.pending_topups.find_one_and_update(
+        {"tx_ref": tx_ref, "credited": False},
+        {"$set": {"credited": True, "transaction_id": transaction_id}},
+    )
+    if not claimed:
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+        return {"balance": u["balance"], "already_credited": True}
     await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": usd_amount}})
-    await db.pending_topups.update_one({"tx_ref": tx_ref}, {"$set": {"credited": True, "transaction_id": transaction_id}})
     await audit("wallet.fiat_topup", user["id"], tx_ref, {"usd_amount": usd_amount, "currency": pending["currency"]})
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return {"balance": u["balance"], "credited_usd": usd_amount}
@@ -1208,7 +1219,7 @@ async def verify_account(body: VerifyAccountIn, _: dict = Depends(get_current_us
                 json={"account_number": body.account_number, "account_bank": body.bank_code},
                 headers={"Authorization": f"Bearer {FLW_SECRET_KEY}", "Content-Type": "application/json"},
             )
-        log.info(f"FLW resolve status={r.status_code} body={r.text[:300]}")
+        log.info(f"FLW resolve status={r.status_code}")
         if r.status_code == 401:
             raise HTTPException(503, "Payment service authentication failed — check FLW_SECRET_KEY")
         if not r.text.strip():
@@ -1483,15 +1494,16 @@ async def admin_refund(order_id: str, admin: dict = Depends(require_admin)):
         raise HTTPException(404, "Not found")
     if o["status"] in ("RELEASED", "REFUNDED"):
         raise HTTPException(400, "Order finalized")
-    await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": o["amount"]}})
+    refund_amount = o.get("total_charged") or o["amount"]
+    await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": refund_amount}})
     timeline = o.get("timeline", [])
-    timeline.append({"status": "REFUNDED", "at": now_utc().isoformat(), "note": f"Admin refund by {admin['username']}"})
+    timeline.append({"status": "REFUNDED", "at": now_utc().isoformat(), "note": f"Admin refund by {admin['username']} (full refund: ${refund_amount:.2f})"})
     await db.orders.update_one({"id": order_id}, {"$set": {
         "status": "REFUNDED", "timeline": timeline, "updated_at": now_utc().isoformat(),
     }})
     # Re-list the listing
     await db.listings.update_one({"id": o["listing_id"]}, {"$set": {"status": "active"}})
-    await audit("order.refund", admin["id"], order_id, {"amount": o["amount"]})
+    await audit("order.refund", admin["id"], order_id, {"amount": refund_amount})
     return {"ok": True}
 
 @api.get("/admin/vault/{listing_id}")
@@ -1530,7 +1542,6 @@ async def reset_test_balances(admin: dict = Depends(require_admin)):
     )
     await audit("wallet.reset_test_balances", admin["id"], "all_users", {"affected": result.modified_count})
     return {"zeroed": result.modified_count}
-    return {"ok": True}
 
 @api.get("/admin/audit")
 async def admin_audit(limit: int = 200, _: dict = Depends(require_admin)):
