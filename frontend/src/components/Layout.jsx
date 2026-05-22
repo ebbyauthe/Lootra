@@ -150,7 +150,7 @@ export default function Layout({ children }) {
             <span>LOOTRA // ESCROW-PROTECTED ACCOUNT MARKETPLACE</span>
           </div>
           <div className="flex items-center gap-4">
-            <Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
+            <Link to="/terms" className="text-[#CCFF00] hover:underline transition-colors">Terms of Service</Link>
             <span>© {new Date().getFullYear()} — All transactions held in escrow.</span>
           </div>
         </div>
