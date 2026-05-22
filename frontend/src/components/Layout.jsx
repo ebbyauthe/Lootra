@@ -149,7 +149,10 @@ export default function Layout({ children }) {
             <ShieldCheck className="w-4 h-4 text-[#CCFF00]" />
             <span>LOOTRA // ESCROW-PROTECTED ACCOUNT MARKETPLACE</span>
           </div>
-          <div>© {new Date().getFullYear()} — All transactions held in escrow.</div>
+          <div className="flex items-center gap-4">
+            <Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
+            <span>© {new Date().getFullYear()} — All transactions held in escrow.</span>
+          </div>
         </div>
       </footer>
     </div>

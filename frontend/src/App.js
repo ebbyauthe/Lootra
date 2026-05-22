@@ -21,6 +21,7 @@ import TopUpCallback from "./pages/TopUpCallback";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
+import Terms from "./pages/Terms";
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="/user/:username" element={<ProfilePage />} />
               <Route path="/topup" element={<ProtectedRoute noAdmin><TopUp /></ProtectedRoute>} />
               <Route path="/topup/callback" element={<ProtectedRoute noAdmin><TopUpCallback /></ProtectedRoute>} />
+              <Route path="/terms" element={<Terms />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>
