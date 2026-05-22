@@ -22,6 +22,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import VerifyEmail from "./pages/VerifyEmail";
 import Terms from "./pages/Terms";
+import ResetWithdrawalPin from "./pages/ResetWithdrawalPin";
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/topup" element={<ProtectedRoute noAdmin><TopUp /></ProtectedRoute>} />
               <Route path="/topup/callback" element={<ProtectedRoute noAdmin><TopUpCallback /></ProtectedRoute>} />
               <Route path="/terms" element={<Terms />} />
+              <Route path="/reset-withdrawal-pin" element={<ResetWithdrawalPin />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </Layout>

@@ -1,14 +1,161 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Wallet, ShoppingBag, Tag, Heart, ArrowDownToLine, X, ChevronDown, Search, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, Wallet, ShoppingBag, Tag, Heart, ArrowDownToLine, X, ChevronDown, Search, TrendingUp, TrendingDown, Lock } from "lucide-react";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
 
+function PinInput({ value = "", onChange, autoFocus }) {
+  const refs = useRef([]);
+  const arr = (value + "      ").slice(0, 6).split("");
+
+  const handleInput = (i, e) => {
+    const ch = e.target.value.replace(/\D/g, "").slice(-1);
+    if (!ch) return;
+    const next = [...arr];
+    next[i] = ch;
+    onChange(next.join("").replace(/ /g, "").slice(0, 6));
+    if (i < 5) setTimeout(() => refs.current[i + 1]?.focus(), 0);
+  };
+
+  const handleKeyDown = (i, e) => {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      if (arr[i].trim()) {
+        const next = [...arr];
+        next[i] = " ";
+        onChange(next.join("").replace(/ /g, ""));
+      } else if (i > 0) {
+        const next = [...arr];
+        next[i - 1] = " ";
+        onChange(next.join("").replace(/ /g, ""));
+        setTimeout(() => refs.current[i - 1]?.focus(), 0);
+      }
+    }
+  };
+
+  return (
+    <div className="flex gap-2 justify-center">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <input
+          key={i}
+          ref={(el) => (refs.current[i] = el)}
+          type="password"
+          inputMode="numeric"
+          maxLength={1}
+          value={arr[i].trim()}
+          autoFocus={autoFocus && i === 0}
+          onChange={(e) => handleInput(i, e)}
+          onKeyDown={(e) => handleKeyDown(i, e)}
+          className="w-11 h-14 text-center bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl font-mono text-xl focus:outline-none focus:border-[#CCFF00] text-white caret-transparent"
+        />
+      ))}
+    </div>
+  );
+}
+
+function SetPinModal({ onClose, hasPin, onSuccess }) {
+  const [step, setStep] = useState(hasPin ? "current" : "new");
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const activePin = step === "current" ? currentPin : step === "new" ? newPin : confirmPin;
+  const setActivePin = (v) => {
+    setError("");
+    if (step === "current") setCurrentPin(v);
+    else if (step === "new") setNewPin(v);
+    else setConfirmPin(v);
+  };
+
+  const handleNext = () => {
+    if (step === "current") {
+      if (currentPin.length !== 6) { setError("Enter your current 6-digit PIN"); return; }
+      setStep("new");
+    } else if (step === "new") {
+      if (newPin.length !== 6) { setError("Enter a 6-digit PIN"); return; }
+      setStep("confirm");
+    }
+  };
+
+  const handleSave = async () => {
+    if (confirmPin !== newPin) { setError("PINs do not match"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      await api.post("/auth/withdrawal-pin/set", {
+        pin: newPin,
+        current_pin: hasPin ? currentPin : "",
+      });
+      toast.success(hasPin ? "PIN updated successfully." : "Withdrawal PIN set.");
+      onSuccess();
+      onClose();
+    } catch (e) {
+      setError(formatError(e) || "Failed to set PIN");
+      setStep("current");
+      setCurrentPin(""); setNewPin(""); setConfirmPin("");
+    }
+    setSaving(false);
+  };
+
+  const stepLabel = {
+    current: "Enter your current PIN",
+    new: "Set your new 6-digit PIN",
+    confirm: "Confirm your new PIN",
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-[#111] border border-[#2A2A2A] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-sm">
+        <div className="border-b border-[#2A2A2A] px-5 py-4 flex items-center justify-between">
+          <div>
+            <div className="lootra-badge inline-block mb-1 text-[9px]">SECURITY</div>
+            <div className="font-medium text-sm">
+              {hasPin ? "Change withdrawal PIN" : "Set withdrawal PIN"}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-[#1a1a1a] rounded-lg">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-6">
+          <p className="text-sm text-neutral-400 text-center">{stepLabel[step]}</p>
+          <PinInput value={activePin} onChange={setActivePin} autoFocus />
+          {error && <p className="text-center text-sm text-[#FF453A]">{error}</p>}
+          {step !== "confirm" ? (
+            <button
+              type="button"
+              onClick={handleNext}
+              disabled={activePin.length !== 6}
+              className="w-full lootra-btn-primary py-3.5 disabled:opacity-40"
+            >
+              Continue
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || confirmPin.length !== 6}
+              className="w-full lootra-btn-primary py-3.5 disabled:opacity-40"
+            >
+              {saving ? "Saving…" : "Save PIN"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Stat({ label, value, icon: Icon, sub }) {
   return (
-    <div className="lootra-card p-6 flex flex-col gap-2" data-testid={`stat-${label.toLowerCase().replace(/\s+/g,'-')}`}>
+    <div className="lootra-card p-6 flex flex-col gap-2" data-testid={`stat-${label.toLowerCase().replace(/\s+/g, "-")}`}>
       <div className="flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">{label}</span>
         <Icon className="w-4 h-4 text-[#CCFF00]" />
@@ -37,11 +184,15 @@ function WithdrawModal({ onClose, walletBalance, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   const [feeInfo, setFeeInfo] = useState(null);
   const [feeLoading, setFeeLoading] = useState(false);
+  const [pinStep, setPinStep] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [forgotSending, setForgotSending] = useState(false);
 
   const available = walletBalance?.available ?? 0;
 
   useEffect(() => {
-    api.get("/catalog/banks").then(r => setBanks(r.data)).catch(() => {});
+    api.get("/catalog/banks").then((r) => setBanks(r.data)).catch(() => {});
   }, []);
 
   const fetchFee = useCallback(async (amt) => {
@@ -90,171 +241,241 @@ function WithdrawModal({ onClose, walletBalance, onSuccess }) {
     if (amt > available) { toast.error("Amount exceeds available balance"); return; }
     if (!selectedBank) { toast.error("Select a bank"); return; }
     if (!accountName) { toast.error("Verify your account number first"); return; }
+    if (!walletBalance?.has_withdrawal_pin) {
+      toast.error("Set a withdrawal PIN before withdrawing.");
+      return;
+    }
+    setPin("");
+    setPinError("");
+    setPinStep(true);
+  };
+
+  const submitWithPin = async () => {
+    if (pin.length !== 6) { setPinError("Enter your 6-digit PIN"); return; }
     setSubmitting(true);
+    setPinError("");
     try {
       await api.post("/wallet/withdraw", {
-        amount_usd: amt,
+        amount_usd: parseFloat(amountUsd),
         bank_code: selectedBank.code,
         bank_name: selectedBank.name,
         account_number: accountNumber,
         account_name: accountName,
+        pin,
       });
       toast.success("Withdrawal request submitted. Admin will process it shortly.");
       onSuccess();
       onClose();
     } catch (e) {
-      toast.error(formatError(e));
+      const msg = formatError(e) || "Request failed";
+      if (msg === "PIN_NOT_SET") {
+        toast.error("Please set a withdrawal PIN first.");
+        onClose();
+      } else {
+        setPinError(msg);
+        setPin("");
+      }
     }
     setSubmitting(false);
   };
 
-  const filteredBanks = banks.filter(b =>
+  const handleForgotPin = async () => {
+    setForgotSending(true);
+    try {
+      await api.post("/auth/withdrawal-pin/forgot");
+      toast.success("PIN reset email sent. Check your inbox.");
+    } catch (e) {
+      toast.error(formatError(e) || "Could not send reset email");
+    }
+    setForgotSending(false);
+  };
+
+  const filteredBanks = banks.filter((b) =>
     b.name.toLowerCase().includes(bankSearch.toLowerCase())
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="bg-[#111] border border-[#2A2A2A] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-[#111] border-b border-[#2A2A2A] px-5 py-4 flex items-center justify-between z-10">
           <div>
-            <div className="lootra-badge inline-block mb-1 text-[9px]">WITHDRAW</div>
-            <div className="font-medium text-sm">Request withdrawal</div>
+            <div className="lootra-badge inline-block mb-1 text-[9px]">
+              {pinStep ? "CONFIRM" : "WITHDRAW"}
+            </div>
+            <div className="font-medium text-sm">
+              {pinStep ? "Enter withdrawal PIN" : "Request withdrawal"}
+            </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-[#1a1a1a] rounded-lg"><X className="w-4 h-4" /></button>
+          <button
+            onClick={pinStep ? () => { setPinStep(false); setPin(""); } : onClose}
+            className="p-2 hover:bg-[#1a1a1a] rounded-lg"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Available balance */}
-          <div className="bg-[#1a1a1a] rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-xs text-neutral-400">Available to withdraw</span>
-            <span className="font-mono text-[#CCFF00] font-bold">{formatPrice(available)}</span>
+        {pinStep ? (
+          <div className="p-5 space-y-6">
+            <p className="text-sm text-neutral-400 text-center leading-relaxed">
+              Enter your 6-digit withdrawal PIN to confirm this request.
+            </p>
+            <PinInput value={pin} onChange={(v) => { setPin(v); setPinError(""); }} autoFocus />
+            {pinError && <p className="text-center text-sm text-[#FF453A]">{pinError}</p>}
+            <button
+              type="button"
+              onClick={submitWithPin}
+              disabled={submitting || pin.length !== 6}
+              className="w-full lootra-btn-primary py-3.5 disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              <ArrowDownToLine className="w-4 h-4" />
+              {submitting ? "Submitting…" : "Confirm withdrawal"}
+            </button>
+            <button
+              type="button"
+              onClick={handleForgotPin}
+              disabled={forgotSending}
+              className="w-full text-center text-xs text-neutral-500 hover:text-[#CCFF00] transition-colors disabled:opacity-40 py-1"
+            >
+              {forgotSending ? "Sending reset email…" : "Forgot PIN?"}
+            </button>
           </div>
-
-          {/* Amount */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Amount (USD)</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">$</span>
-              <input
-                type="number"
-                min="0.80"
-                step="0.01"
-                value={amountUsd}
-                onChange={e => setAmountUsd(e.target.value)}
-                placeholder="0.00"
-                className="w-full bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 pl-7 font-mono text-sm focus:outline-none focus:border-[#CCFF00] text-white"
-              />
-              <button
-                type="button"
-                onClick={() => setAmountUsd(available.toFixed(2))}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#CCFF00] hover:underline"
-              >MAX</button>
+        ) : (
+          <div className="p-5 space-y-5">
+            {/* Available balance */}
+            <div className="bg-[#1a1a1a] rounded-xl px-4 py-3 flex items-center justify-between">
+              <span className="text-xs text-neutral-400">Available to withdraw</span>
+              <span className="font-mono text-[#CCFF00] font-bold">{formatPrice(available)}</span>
             </div>
-          </div>
 
-          {/* Fee preview */}
-          {amountUsd && parseFloat(amountUsd) > 0 && (
-            <div className="bg-[#1a1a1a] rounded-xl px-4 py-3 space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between text-neutral-400">
-                <span>Platform fee ({feeInfo ? `${(feeInfo.rate * 100).toFixed(0)}%` : "5%"})</span>
-                <span className="text-[#FF453A]">{feeLoading ? "..." : feeInfo ? `-$${feeInfo.fee}` : ""}</span>
+            {/* Amount */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Amount (USD)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-mono text-sm">$</span>
+                <input
+                  type="number"
+                  min="0.80"
+                  step="0.01"
+                  value={amountUsd}
+                  onChange={(e) => setAmountUsd(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 pl-7 font-mono text-sm focus:outline-none focus:border-[#CCFF00] text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAmountUsd(available.toFixed(2))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-[#CCFF00] hover:underline"
+                >MAX</button>
               </div>
-              <div className="flex justify-between border-t border-[#2A2A2A] pt-1.5">
-                <span className="text-neutral-400">You receive</span>
-                <span className="text-[#CCFF00]">{feeLoading ? "..." : feeInfo ? `$${feeInfo.net}` : ""}</span>
-              </div>
-              <div className="text-[9px] text-neutral-600 mt-1">Converted to NGN at live rate at time of transfer</div>
             </div>
-          )}
 
-          {/* Bank dropdown */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Bank</label>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setBankOpen(v => !v)}
-                className="w-full bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 text-sm text-left flex items-center justify-between focus:outline-none focus:border-[#CCFF00]"
-              >
-                <span className={selectedBank ? "text-white" : "text-neutral-500"}>
-                  {selectedBank ? selectedBank.name : "Select bank…"}
-                </span>
-                <ChevronDown className="w-4 h-4 text-neutral-400 shrink-0" />
-              </button>
-              {bankOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl z-20 max-h-48 overflow-hidden flex flex-col shadow-xl">
-                  <div className="p-2 border-b border-[#2A2A2A] flex items-center gap-2">
-                    <Search className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-                    <input
-                      autoFocus
-                      value={bankSearch}
-                      onChange={e => setBankSearch(e.target.value)}
-                      placeholder="Search banks…"
-                      className="flex-1 bg-transparent text-sm focus:outline-none text-white placeholder:text-neutral-600"
-                    />
+            {/* Fee preview */}
+            {amountUsd && parseFloat(amountUsd) > 0 && (
+              <div className="bg-[#1a1a1a] rounded-xl px-4 py-3 space-y-1.5 text-xs font-mono">
+                <div className="flex justify-between text-neutral-400">
+                  <span>Platform fee ({feeInfo ? `${(feeInfo.rate * 100).toFixed(0)}%` : "5%"})</span>
+                  <span className="text-[#FF453A]">{feeLoading ? "..." : feeInfo ? `-$${feeInfo.fee}` : ""}</span>
+                </div>
+                <div className="flex justify-between border-t border-[#2A2A2A] pt-1.5">
+                  <span className="text-neutral-400">You receive</span>
+                  <span className="text-[#CCFF00]">{feeLoading ? "..." : feeInfo ? `$${feeInfo.net}` : ""}</span>
+                </div>
+                <div className="text-[9px] text-neutral-600 mt-1">Converted to NGN at live rate at time of transfer</div>
+              </div>
+            )}
+
+            {/* Bank dropdown */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Bank</label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setBankOpen((v) => !v)}
+                  className="w-full bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 text-sm text-left flex items-center justify-between focus:outline-none focus:border-[#CCFF00]"
+                >
+                  <span className={selectedBank ? "text-white" : "text-neutral-500"}>
+                    {selectedBank ? selectedBank.name : "Select bank…"}
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-neutral-400 shrink-0" />
+                </button>
+                {bankOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl z-20 max-h-48 overflow-hidden flex flex-col shadow-xl">
+                    <div className="p-2 border-b border-[#2A2A2A] flex items-center gap-2">
+                      <Search className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                      <input
+                        autoFocus
+                        value={bankSearch}
+                        onChange={(e) => setBankSearch(e.target.value)}
+                        placeholder="Search banks…"
+                        className="flex-1 bg-transparent text-sm focus:outline-none text-white placeholder:text-neutral-600"
+                      />
+                    </div>
+                    <div className="overflow-y-auto">
+                      {filteredBanks.length === 0 && (
+                        <div className="px-4 py-3 text-sm text-neutral-500">No results</div>
+                      )}
+                      {filteredBanks.map((b) => (
+                        <button
+                          key={b.code}
+                          type="button"
+                          onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(""); setAccountName(null); }}
+                          className="w-full px-4 py-2.5 text-sm text-left hover:bg-[#2A2A2A] text-white transition-colors"
+                        >{b.name}</button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="overflow-y-auto">
-                    {filteredBanks.length === 0 && (
-                      <div className="px-4 py-3 text-sm text-neutral-500">No results</div>
-                    )}
-                    {filteredBanks.map(b => (
-                      <button
-                        key={b.code}
-                        type="button"
-                        onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(""); setAccountName(null); }}
-                        className="w-full px-4 py-2.5 text-sm text-left hover:bg-[#2A2A2A] text-white transition-colors"
-                      >{b.name}</button>
-                    ))}
-                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Account number + verify */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Account Number</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={accountNumber}
+                  onChange={(e) => { setAccountNumber(e.target.value.replace(/\D/g, "")); setAccountName(null); }}
+                  placeholder="0000000000"
+                  className="flex-1 bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-[#CCFF00] text-white"
+                />
+                <button
+                  type="button"
+                  onClick={verify}
+                  disabled={verifying || !selectedBank || accountNumber.length !== 10}
+                  className="lootra-btn-secondary !py-3 px-4 text-xs shrink-0 disabled:opacity-40"
+                >{verifying ? "…" : "Verify"}</button>
+              </div>
+              {accountName && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-[#CCFF00]/10 border border-[#CCFF00]/30 rounded-lg">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#CCFF00] shrink-0" />
+                  <span className="text-sm font-medium text-[#CCFF00]">{accountName}</span>
                 </div>
               )}
             </div>
+
+            {/* Submit */}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={submitting || !accountName || !amountUsd || parseFloat(amountUsd) <= 0}
+              className="w-full lootra-btn-primary py-3.5 disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              <ArrowDownToLine className="w-4 h-4" />
+              {submitting ? "Submitting…" : "Request withdrawal"}
+            </button>
+
+            <p className="text-[10px] text-center text-neutral-600 font-mono leading-relaxed">
+              Withdrawals are reviewed and processed by admins within 24h.
+              Funds will be sent to the verified bank account above.
+            </p>
           </div>
-
-          {/* Account number + verify */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">Account Number</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={10}
-                value={accountNumber}
-                onChange={e => { setAccountNumber(e.target.value.replace(/\D/g, "")); setAccountName(null); }}
-                placeholder="0000000000"
-                className="flex-1 bg-[#1a1a1a] border border-[#2A2A2A] rounded-xl px-4 py-3 font-mono text-sm focus:outline-none focus:border-[#CCFF00] text-white"
-              />
-              <button
-                type="button"
-                onClick={verify}
-                disabled={verifying || !selectedBank || accountNumber.length !== 10}
-                className="lootra-btn-secondary !py-3 px-4 text-xs shrink-0 disabled:opacity-40"
-              >{verifying ? "…" : "Verify"}</button>
-            </div>
-            {accountName && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-[#CCFF00]/10 border border-[#CCFF00]/30 rounded-lg">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#CCFF00] shrink-0" />
-                <span className="text-sm font-medium text-[#CCFF00]">{accountName}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Submit */}
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting || !accountName || !amountUsd || parseFloat(amountUsd) <= 0}
-            className="w-full lootra-btn-primary py-3.5 disabled:opacity-40 flex items-center justify-center gap-2"
-          >
-            <ArrowDownToLine className="w-4 h-4" />
-            {submitting ? "Submitting…" : "Request withdrawal"}
-          </button>
-
-          <p className="text-[10px] text-center text-neutral-600 font-mono leading-relaxed">
-            Withdrawals are reviewed and processed by admins within 24h.
-            Funds will be sent to the verified bank account above.
-          </p>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -270,6 +491,7 @@ export default function Dashboard() {
   const [watch, setWatch] = useState([]);
   const [walletBalance, setWalletBalance] = useState(null);
   const [showWithdraw, setShowWithdraw] = useState(false);
+  const [showSetPin, setShowSetPin] = useState(false);
   const [history, setHistory] = useState([]);
 
   const loadWallet = async () => {
@@ -292,7 +514,7 @@ export default function Dashboard() {
   useEffect(() => {
     load().catch(() => {});
     loadWallet();
-    api.get("/wallet/history").then(r => setHistory(r.data)).catch(() => {});
+    api.get("/wallet/history").then((r) => setHistory(r.data)).catch(() => {});
   }, []);
 
   const TABS = [
@@ -324,13 +546,27 @@ export default function Dashboard() {
           <p className="text-sm text-neutral-400 mt-1">Manage purchases, listings, and your escrow wallet.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Link to="/topup" className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="topup-link"><Wallet className="w-4 h-4" /> Top Up</Link>
+          <Link to="/topup" className="lootra-btn-secondary inline-flex items-center gap-2" data-testid="topup-link">
+            <Wallet className="w-4 h-4" /> Top Up
+          </Link>
+          <button
+            onClick={() => setShowSetPin(true)}
+            className="lootra-btn-secondary inline-flex items-center gap-2"
+            data-testid="pin-btn"
+          >
+            <Lock className="w-4 h-4" />
+            {walletBalance?.has_withdrawal_pin ? "Change PIN" : "Set PIN"}
+          </button>
           <button
             onClick={() => setShowWithdraw(true)}
             className="lootra-btn-secondary inline-flex items-center gap-2"
             data-testid="withdraw-btn"
-          ><ArrowDownToLine className="w-4 h-4" /> Withdraw</button>
-          <Link to="/sell" className="lootra-btn-primary inline-flex items-center gap-2" data-testid="new-listing-btn"><Plus className="w-4 h-4" /> New listing</Link>
+          >
+            <ArrowDownToLine className="w-4 h-4" /> Withdraw
+          </button>
+          <Link to="/sell" className="lootra-btn-primary inline-flex items-center gap-2" data-testid="new-listing-btn">
+            <Plus className="w-4 h-4" /> New listing
+          </Link>
         </div>
       </div>
 
@@ -355,13 +591,36 @@ export default function Dashboard() {
         <Stat label="Trust score" value={user?.trust_score || 0} icon={Heart} />
       </div>
 
+      {walletBalance && !walletBalance.has_withdrawal_pin && (
+        <div className="lootra-card p-4 border border-[#CCFF00]/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Lock className="w-5 h-5 text-[#CCFF00] shrink-0" />
+            <div>
+              <div className="text-sm font-medium">Set a withdrawal PIN</div>
+              <div className="text-xs text-neutral-400 mt-0.5">
+                A 6-digit PIN is required before you can withdraw funds.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowSetPin(true)}
+            className="lootra-btn-primary !py-2 !px-4 text-sm shrink-0 w-full sm:w-auto"
+          >
+            Set PIN
+          </button>
+        </div>
+      )}
+
       <div className="border-b border-[#2A2A2A] flex gap-1 overflow-x-auto no-scrollbar" data-testid="dashboard-tabs">
         {TABS.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)}
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
             className={`px-4 py-3 text-sm tracking-tight transition-colors border-b-2 ${
               tab === t.id ? "border-[#CCFF00] text-white" : "border-transparent text-neutral-400 hover:text-white"
             }`}
-            data-testid={`tab-${t.id}`}>
+            data-testid={`tab-${t.id}`}
+          >
             {t.label} <span className="font-mono text-xs text-neutral-500">({t.count})</span>
           </button>
         ))}
@@ -380,13 +639,24 @@ export default function Dashboard() {
           onSuccess={loadWallet}
         />
       )}
+      {showSetPin && (
+        <SetPinModal
+          onClose={() => setShowSetPin(false)}
+          hasPin={!!walletBalance?.has_withdrawal_pin}
+          onSuccess={loadWallet}
+        />
+      )}
     </div>
   );
 }
 
 function OrdersTable({ orders, type }) {
   if (orders.length === 0)
-    return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No {type === "buyer" ? "purchases" : "sales"} yet.</div>;
+    return (
+      <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">
+        No {type === "buyer" ? "purchases" : "sales"} yet.
+      </div>
+    );
   return (
     <div className="space-y-3">
       {orders.map((o) => (
@@ -395,7 +665,7 @@ function OrdersTable({ orders, type }) {
             <div className="min-w-0">
               <div className="font-medium text-sm truncate">{o.listing_snapshot?.title}</div>
               <div className="text-[10px] font-mono text-neutral-500 mt-0.5">
-                #{o.id.slice(0,8)} · @{type === "buyer" ? o.seller_username : o.buyer_username}
+                #{o.id.slice(0, 8)} · @{type === "buyer" ? o.seller_username : o.buyer_username}
               </div>
             </div>
             <div className="text-right shrink-0">
@@ -403,7 +673,11 @@ function OrdersTable({ orders, type }) {
               <div className={`font-mono text-[10px] mt-0.5 ${STATUS_COLORS[o.status] || ""}`}>{o.status}</div>
             </div>
           </div>
-          <Link to={`/order/${o.id}`} className="lootra-btn-secondary !py-2 text-center text-xs w-full" data-testid={`view-order-${o.id}`}>
+          <Link
+            to={`/order/${o.id}`}
+            className="lootra-btn-secondary !py-2 text-center text-xs w-full"
+            data-testid={`view-order-${o.id}`}
+          >
             View order →
           </Link>
         </div>
@@ -419,7 +693,12 @@ function ListingsTable({ listings, reload }) {
     catch (e) { toast.error(formatError(e)); }
   };
   if (listings.length === 0)
-    return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No listings yet. <Link to="/sell" className="text-[#CCFF00] underline">Create one</Link>.</div>;
+    return (
+      <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">
+        No listings yet.{" "}
+        <Link to="/sell" className="text-[#CCFF00] underline">Create one</Link>.
+      </div>
+    );
   return (
     <div className="space-y-3">
       {listings.map((l) => (
@@ -435,7 +714,11 @@ function ListingsTable({ listings, reload }) {
             </div>
           </div>
           {l.status !== "sold" && (
-            <button onClick={() => remove(l.id)} className="lootra-btn-secondary !py-2 text-center text-xs w-full !border-[#FF453A] !text-[#FF453A]" data-testid={`delete-listing-${l.id}`}>
+            <button
+              onClick={() => remove(l.id)}
+              className="lootra-btn-secondary !py-2 text-center text-xs w-full !border-[#FF453A] !text-[#FF453A]"
+              data-testid={`delete-listing-${l.id}`}
+            >
               Delete listing
             </button>
           )}
@@ -471,7 +754,11 @@ const STATUS_LABEL = {
 
 function WalletHistory({ items }) {
   if (items.length === 0)
-    return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">No wallet activity yet.</div>;
+    return (
+      <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">
+        No wallet activity yet.
+      </div>
+    );
   return (
     <div className="space-y-3">
       {items.map((item, i) => {
@@ -507,7 +794,11 @@ function WalletHistory({ items }) {
 
 function WatchGrid({ items }) {
   if (items.length === 0)
-    return <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">Nothing saved yet.</div>;
+    return (
+      <div className="border border-dashed border-[#2A2A2A] p-12 text-center text-neutral-500 font-mono text-sm">
+        Nothing saved yet.
+      </div>
+    );
   return (
     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
       {items.map((l) => (

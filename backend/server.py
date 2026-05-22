@@ -314,6 +314,15 @@ class WithdrawIn(BaseModel):
     bank_name: str
     account_number: str
     account_name: str
+    pin: str = ""
+
+class SetWithdrawalPinIn(BaseModel):
+    pin: str = Field(min_length=6, max_length=6)
+    current_pin: str = ""
+
+class ResetWithdrawalPinIn(BaseModel):
+    token: str
+    pin: str = Field(min_length=6, max_length=6)
 
 class WithdrawalRejectIn(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
@@ -338,6 +347,8 @@ async def startup():
     await db.ratings.create_index([("order_id", 1), ("rater_id", 1)], unique=True)
     await db.wallet_credits.create_index([("user_id", 1), ("withdrawn", 1), ("withdrawable_after", 1)])
     await db.withdrawals.create_index([("status", 1), ("created_at", -1)])
+    await db.withdrawal_pin_resets.create_index("token", unique=True)
+    await db.withdrawal_pin_resets.create_index("expires_at", expireAfterSeconds=0)
     await db.config.create_index("key", unique=True)
     if not await db.config.find_one({"key": "fees"}):
         await db.config.insert_one({
@@ -739,6 +750,20 @@ async def notify_seller_withdrawal_rejected(seller_email: str, w: dict, reason: 
         ) + _btn(f"{FRONTEND_URL}/dashboard", "View wallet"))
     await send_email(seller_email, "Withdrawal rejected — funds returned to wallet", html)
 
+async def send_withdrawal_pin_reset_email(email: str, token: str):
+    url = f"{FRONTEND_URL}/reset-withdrawal-pin?token={token}"
+    html = _notif_html("Reset your withdrawal PIN",
+        _intro("We received a request to reset your Lootra withdrawal PIN. Click the button below to set a new 6-digit PIN.") +
+        _btn(url, "Reset withdrawal PIN") +
+        "<p style='color:#666;font-size:12px;text-align:center;margin-top:16px;'>This link expires in 1 hour. If you did not request this, your account is safe — no action needed.</p>")
+    await send_email(email, "Reset your Lootra withdrawal PIN", html)
+
+async def notify_withdrawal_pin_changed(email: str):
+    html = _notif_html("Withdrawal PIN changed",
+        _intro("Your Lootra withdrawal PIN has been successfully updated. If you did not make this change, please contact support immediately.") +
+        _btn(f"{FRONTEND_URL}/dashboard", "Go to dashboard"))
+    await send_email(email, "Your Lootra withdrawal PIN was changed", html)
+
 async def notify_deadline_reminder(order: dict):
     buyer = await db.users.find_one({"id": order["buyer_id"]}, {"_id": 0, "email": 1})
     seller = await db.users.find_one({"id": order["seller_id"]}, {"_id": 0, "email": 1})
@@ -815,6 +840,51 @@ async def resend_verification(data: ForgotPasswordIn, request: Request):
     await db.email_verifications.delete_many({"user_id": user["id"]})
     await db.email_verifications.insert_one({"user_id": user["id"], "token": token, "expires_at": expires})
     await send_verification_email(user["email"], token)
+    return {"ok": True}
+
+@api.post("/auth/withdrawal-pin/set")
+async def set_withdrawal_pin(body: SetWithdrawalPinIn, user: dict = Depends(get_current_user)):
+    if not body.pin.isdigit():
+        raise HTTPException(400, "PIN must be 6 digits")
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "withdrawal_pin_hash": 1, "email": 1})
+    if u.get("withdrawal_pin_hash"):
+        if not body.current_pin:
+            raise HTTPException(400, "Current PIN required")
+        if not verify_pw(body.current_pin, u["withdrawal_pin_hash"]):
+            raise HTTPException(400, "Incorrect current PIN")
+    hashed = hash_pw(body.pin)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"withdrawal_pin_hash": hashed}})
+    await audit("user.withdrawal_pin_set", user["id"], user["id"], {})
+    await _safe_notify(notify_withdrawal_pin_changed(u["email"]))
+    return {"ok": True}
+
+@api.post("/auth/withdrawal-pin/forgot")
+async def forgot_withdrawal_pin(user: dict = Depends(get_current_user)):
+    await _check_rate_limit(user["id"], "pin-reset", limit=3, window_minutes=60)
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    await db.withdrawal_pin_resets.delete_many({"user_id": user["id"]})
+    await db.withdrawal_pin_resets.insert_one({"user_id": user["id"], "token": token, "expires_at": expires, "used": False})
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "email": 1})
+    if u:
+        await _safe_notify(send_withdrawal_pin_reset_email(u["email"], token))
+    return {"ok": True}
+
+@api.post("/auth/withdrawal-pin/reset")
+async def reset_withdrawal_pin(body: ResetWithdrawalPinIn):
+    if not body.pin.isdigit():
+        raise HTTPException(400, "PIN must be 6 digits")
+    rec = await db.withdrawal_pin_resets.find_one({"token": body.token, "used": False})
+    if not rec:
+        raise HTTPException(400, "Invalid or expired reset link")
+    if rec["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(400, "Reset link has expired")
+    hashed = hash_pw(body.pin)
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"withdrawal_pin_hash": hashed}})
+    await db.withdrawal_pin_resets.update_one({"token": body.token}, {"$set": {"used": True}})
+    u = await db.users.find_one({"id": rec["user_id"]}, {"_id": 0, "email": 1})
+    if u:
+        await _safe_notify(notify_withdrawal_pin_changed(u["email"]))
     return {"ok": True}
 
 @api.post("/auth/logout")
@@ -1493,10 +1563,26 @@ async def wallet_balance(user: dict = Depends(get_current_user)):
     next_release = min((c["withdrawable_after"] for c in held_credits), default=None)
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     fee_config = await get_fee_config()
-    return {"total": u.get("balance", 0), "available": available, "held": held, "next_release": next_release, "fee_config": fee_config}
+    return {"total": u.get("balance", 0), "available": available, "held": held, "next_release": next_release, "fee_config": fee_config, "has_withdrawal_pin": bool(u.get("withdrawal_pin_hash"))}
 
 @api.post("/wallet/withdraw")
 async def request_withdrawal(body: WithdrawIn, user: dict = Depends(get_current_user)):
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "withdrawal_pin_hash": 1})
+    if not u.get("withdrawal_pin_hash"):
+        raise HTTPException(400, "PIN_NOT_SET")
+    pin_key = f"withdrawal_pin:{user['id']}"
+    pin_rec = await db.login_attempts.find_one({"identifier": pin_key})
+    if pin_rec and pin_rec.get("locked_until") and datetime.fromisoformat(pin_rec["locked_until"]) > now_utc():
+        raise HTTPException(429, "Too many incorrect PIN attempts — try again in 30 minutes")
+    if not body.pin or not verify_pw(body.pin, u["withdrawal_pin_hash"]):
+        attempts = (pin_rec or {}).get("attempts", 0) + 1
+        update = {"attempts": attempts, "last_at": now_utc().isoformat()}
+        if attempts >= 5:
+            update["locked_until"] = (now_utc() + timedelta(minutes=30)).isoformat()
+            update["attempts"] = 0
+        await db.login_attempts.update_one({"identifier": pin_key}, {"$set": update}, upsert=True)
+        raise HTTPException(400, "Incorrect PIN")
+    await db.login_attempts.delete_one({"identifier": pin_key})
     config = await get_fee_config()
     if body.amount_usd < config["min_withdrawal_usd"]:
         raise HTTPException(400, f"Minimum withdrawal is ${config['min_withdrawal_usd']:.2f}")
