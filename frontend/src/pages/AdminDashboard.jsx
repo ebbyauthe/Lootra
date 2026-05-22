@@ -18,6 +18,8 @@ export default function AdminDashboard() {
   const [settleModal, setSettleModal] = useState(null);
   const [settleNote, setSettleNote] = useState("");
   const [settling, setSettling] = useState(false);
+  const [pendingSettleAction, setPendingSettleAction] = useState(null);
+  const [confirmInput, setConfirmInput] = useState("");
   const [withdrawals, setWithdrawals] = useState([]);
   const [rejectModal, setRejectModal] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -51,7 +53,7 @@ export default function AdminDashboard() {
 
   const approve = async (id) => { try { await api.post(`/admin/listings/${id}/approve`); toast.success("Approved"); load(); } catch (e) { toast.error(formatError(e)); } };
   const reject = async (id) => { try { await api.post(`/admin/listings/${id}/reject`); toast.success("Rejected"); load(); } catch (e) { toast.error(formatError(e)); } };
-  const refund = async (id) => { try { await api.post(`/admin/orders/${id}/refund`); toast.success("Refunded"); load(); } catch (e) { toast.error(formatError(e)); } };
+  const openRefundModal = (order) => { setSettleModal({ order, directRefund: true }); setPendingSettleAction("refund"); setConfirmInput(""); setSettleNote(""); };
   const ban = async (id) => { try { await api.post(`/admin/users/${id}/ban`); toast.success("User banned"); load(); } catch (e) { toast.error(formatError(e)); } };
   const peekVault = async (id) => {
     try { const { data } = await api.get(`/admin/vault/${id}`); setVault({ id, ...data }); }
@@ -81,12 +83,19 @@ export default function AdminDashboard() {
     finally { setConfigSaving(false); }
   };
 
-  const settle = async (action) => {
+  const closeSettleModal = () => { setSettleModal(null); setSettleNote(""); setPendingSettleAction(null); setConfirmInput(""); };
+
+  const settle = async () => {
     setSettling(true);
     try {
-      await api.post(`/admin/orders/${settleModal.order.id}/settle`, { action, note: settleNote });
-      toast.success(action === "release" ? "Funds released to seller" : "Buyer refunded");
-      setSettleModal(null); setSettleNote("");
+      if (settleModal.directRefund) {
+        await api.post(`/admin/orders/${settleModal.order.id}/refund`);
+        toast.success("Buyer refunded in full");
+      } else {
+        await api.post(`/admin/orders/${settleModal.order.id}/settle`, { action: pendingSettleAction, note: settleNote });
+        toast.success(pendingSettleAction === "release" ? "Funds released to seller" : "Buyer refunded in full");
+      }
+      closeSettleModal();
       load();
     } catch (e) { toast.error(formatError(e)); }
     finally { setSettling(false); }
@@ -205,7 +214,7 @@ export default function AdminDashboard() {
                     <MessageSquare className="w-3 h-3" /> View chat
                   </Link>
                   <button
-                    onClick={() => { setSettleModal({ order: o }); setSettleNote(""); }}
+                    onClick={() => { setSettleModal({ order: o }); setSettleNote(""); setPendingSettleAction(null); setConfirmInput(""); }}
                     className="lootra-btn-primary !py-1 !px-2 text-xs inline-flex items-center gap-1"
                     data-testid={`settle-${o.id}`}
                   >
@@ -240,10 +249,10 @@ export default function AdminDashboard() {
                   <MessageSquare className="w-3 h-3" /> Chat
                 </Link>
                 {["PAID","DELIVERED","DISPUTED"].includes(o.status) && (
-                  <button onClick={() => refund(o.id)} className="lootra-btn-secondary !py-1 !px-2 text-xs" data-testid={`refund-${o.id}`}>Refund buyer</button>
+                  <button onClick={() => openRefundModal(o)} className="lootra-btn-secondary !py-1 !px-2 text-xs !border-[#FF453A] !text-[#FF453A]" data-testid={`refund-${o.id}`}>Refund buyer</button>
                 )}
                 {["DISPUTED", "CONFIRMED"].includes(o.status) && (
-                  <button onClick={() => { setSettleModal({ order: o }); setSettleNote(""); }} className="lootra-btn-primary !py-1 !px-2 text-xs">
+                  <button onClick={() => { setSettleModal({ order: o }); setSettleNote(""); setPendingSettleAction(null); setConfirmInput(""); }} className="lootra-btn-primary !py-1 !px-2 text-xs">
                     Settle
                   </button>
                 )}
@@ -374,31 +383,88 @@ export default function AdminDashboard() {
       {preview && <ListingPreviewModal listing={preview} onClose={() => setPreview(null)} onApprove={() => { approve(preview.id); setPreview(null); }} onReject={() => { reject(preview.id); setPreview(null); }} />}
 
       {settleModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSettleModal(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-lg w-full p-6">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-1">Settle dispute</div>
-            <div className="font-medium mb-1">{settleModal.order.listing_snapshot?.title}</div>
-            <div className="text-xs text-neutral-400 mb-4 font-mono">
-              Order #{settleModal.order.id.slice(0, 8)} · ${settleModal.order.amount.toFixed(2)} · Buyer: @{settleModal.order.buyer_username} · Seller: @{settleModal.order.seller_username}
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={closeSettleModal}>
+          <div onClick={(e) => e.stopPropagation()} className="lootra-card max-w-lg w-full p-6 space-y-4">
+
+            {/* Order summary — always visible */}
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500 mb-1">
+                {settleModal.directRefund ? "Refund buyer" : "Settle dispute"}
+              </div>
+              <div className="font-medium">{settleModal.order.listing_snapshot?.title}</div>
+              <div className="text-xs text-neutral-400 font-mono mt-1">
+                Order #{settleModal.order.id.slice(0, 8)} ·{" "}
+                <span className="text-[#CCFF00]">${(settleModal.order.total_charged ?? settleModal.order.amount).toFixed(2)}</span>
+                {" "}· Buyer: @{settleModal.order.buyer_username} · Seller: @{settleModal.order.seller_username}
+              </div>
             </div>
-            <div className="text-xs text-neutral-500 mb-2 font-mono">Optional note (added to order timeline)</div>
-            <textarea
-              className="lootra-input min-h-[80px] mb-5"
-              value={settleNote}
-              onChange={(e) => setSettleNote(e.target.value)}
-              placeholder="Note for the timeline (optional)…"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => settle("release")} disabled={settling} className="lootra-btn-primary flex-1 inline-flex items-center justify-center gap-2">
-                <Check className="w-4 h-4" /> Release to seller
-              </button>
-              <button onClick={() => settle("refund")} disabled={settling} className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-sm inline-flex items-center justify-center gap-2">
-                <X className="w-4 h-4" /> Refund buyer
-              </button>
-            </div>
-            <div className="flex justify-end mt-3">
-              <button onClick={() => setSettleModal(null)} className="lootra-btn-secondary">Cancel</button>
-            </div>
+
+            {/* Step 1 — choose action + note */}
+            {!pendingSettleAction && (
+              <>
+                <div className="space-y-1.5">
+                  <div className="text-xs text-neutral-500 font-mono">Optional note (added to order timeline)</div>
+                  <textarea
+                    className="lootra-input min-h-[80px]"
+                    value={settleNote}
+                    onChange={(e) => setSettleNote(e.target.value)}
+                    placeholder="Note for the timeline (optional)…"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setPendingSettleAction("release"); setConfirmInput(""); }}
+                    className="lootra-btn-primary flex-1 inline-flex items-center justify-center gap-2"
+                  >
+                    <Check className="w-4 h-4" /> Release to seller
+                  </button>
+                  <button
+                    onClick={() => { setPendingSettleAction("refund"); setConfirmInput(""); }}
+                    className="flex-1 py-2 px-4 border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10 transition-colors font-mono text-sm inline-flex items-center justify-center gap-2"
+                  >
+                    <X className="w-4 h-4" /> Refund buyer
+                  </button>
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={closeSettleModal} className="lootra-btn-secondary">Cancel</button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2 — CONFIRM input */}
+            {pendingSettleAction && (
+              <>
+                <div className={`p-3 border text-sm font-mono ${pendingSettleAction === "release" ? "border-[#CCFF00]/30 bg-[#CCFF00]/5 text-[#CCFF00]" : "border-[#FF453A]/30 bg-[#FF453A]/5 text-[#FF453A]"}`}>
+                  {pendingSettleAction === "release"
+                    ? `Release $${settleModal.order.amount.toFixed(2)} to @${settleModal.order.seller_username}`
+                    : `Refund $${(settleModal.order.total_charged ?? settleModal.order.amount).toFixed(2)} to @${settleModal.order.buyer_username}`}
+                </div>
+                <div className="text-xs text-neutral-400">This action is irreversible. Type <span className="font-mono text-white">CONFIRM</span> below to proceed.</div>
+                <input
+                  className="lootra-input font-mono tracking-widest"
+                  placeholder="Type CONFIRM"
+                  value={confirmInput}
+                  onChange={(e) => setConfirmInput(e.target.value.toUpperCase())}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={settle}
+                    disabled={confirmInput !== "CONFIRM" || settling}
+                    className={`flex-1 py-2 px-4 font-mono text-sm inline-flex items-center justify-center gap-2 transition-colors ${
+                      pendingSettleAction === "release"
+                        ? "lootra-btn-primary"
+                        : "border border-[#FF453A] text-[#FF453A] hover:bg-[#FF453A]/10"
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    <Check className="w-4 h-4" /> {settling ? "Processing…" : "Confirm"}
+                  </button>
+                  <button onClick={() => { setPendingSettleAction(null); setConfirmInput(""); }} className="lootra-btn-secondary">
+                    Back
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
