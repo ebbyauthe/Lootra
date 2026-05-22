@@ -408,6 +408,17 @@ async def _order_scheduler():
                     "status": "DISPUTED", "timeline": timeline, "updated_at": now.isoformat(),
                 }})
                 log.info(f"Auto-disputed order {o['id']}")
+            # 32-minute deadline reminder: send once when ~half of 65-min window remains
+            remind_from = (now + timedelta(minutes=30)).isoformat()
+            remind_to = (now + timedelta(minutes=34)).isoformat()
+            async for o in db.orders.find({
+                "status": {"$in": ["PAID", "DELIVERED"]},
+                "handover_deadline": {"$gte": remind_from, "$lte": remind_to},
+                "deadline_reminder_sent": {"$ne": True},
+            }):
+                await db.orders.update_one({"id": o["id"]}, {"$set": {"deadline_reminder_sent": True}})
+                await _safe_notify(notify_deadline_reminder(o))
+                log.info(f"Sent deadline reminder for order {o['id']}")
             # Auto-release: CONFIRMED orders past complaint window OR with no window set (legacy)
             async for o in db.orders.find({"status": "CONFIRMED", "$or": [
                 {"complaint_window_until": {"$lt": now.isoformat()}},
@@ -529,6 +540,224 @@ async def send_reset_email(to_email: str, token: str):
   <p style="color:#999;font-size:13px;margin:0 0 24px">Click below to set a new password. This link expires in 1 hour.</p>
   <a href="{url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600">Reset password</a>""")
     await send_email(to_email, "Reset your Lootra password", html)
+
+# ---------------- Notification Emails ----------------
+def _notif_html(title: str, body_html: str) -> str:
+    return f"""<div style="font-family:monospace;max-width:480px;margin:0 auto;padding:32px;background:#0A0A0A;color:#fff;border:1px solid #2A2A2A">
+  <div style="color:#CCFF00;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">LOOTRA</div>
+  <h2 style="font-size:20px;font-weight:500;margin:0 0 12px">{title}</h2>
+  {body_html}
+  <p style="color:#555;font-size:11px;margin:24px 0 0">Automated notification from Lootra — do not reply to this email.</p>
+</div>"""
+
+def _row(label: str, value: str) -> str:
+    return f'<tr><td style="color:#555;padding:4px 8px 4px 0;font-size:12px;vertical-align:top">{label}</td><td style="color:#ccc;font-size:12px">{value}</td></tr>'
+
+def _tbl(*rows: str) -> str:
+    return f'<table style="width:100%;font-family:monospace;border-collapse:collapse;margin:16px 0">{"".join(rows)}</table>'
+
+def _intro(text: str) -> str:
+    return f'<p style="color:#999;font-size:13px;margin:0 0 16px;line-height:1.6">{text}</p>'
+
+def _btn(url: str, text: str) -> str:
+    return f'<a href="{url}" style="display:inline-block;background:#CCFF00;color:#000;padding:12px 24px;font-family:monospace;font-size:13px;text-decoration:none;font-weight:600;margin-top:20px">{text}</a>'
+
+async def _safe_notify(coro):
+    try: await coro
+    except Exception as e: log.warning(f"Email notification failed: {e}")
+
+async def notify_admin_new_listing(listing: dict):
+    html = _notif_html("New listing pending review",
+        _intro("A seller has submitted a new listing that requires your approval.") +
+        _tbl(
+            _row("Title", listing["title"]),
+            _row("Game", listing["game"]),
+            _row("Seller", f"@{listing['seller_username']}"),
+            _row("Price", f"${listing['price']:.2f}"),
+        ) +
+        _btn(f"{FRONTEND_URL}/admin", "Review listing"))
+    await send_email(ADMIN_EMAIL, f"New listing pending — {listing['title']}", html)
+
+async def notify_seller_listing_approved(seller_email: str, listing: dict):
+    html = _notif_html("Listing approved",
+        _intro("Your listing has been reviewed and approved. It is now live on Lootra.") +
+        _tbl(
+            _row("Title", listing["title"]),
+            _row("Price", f"${listing['price']:.2f}"),
+            _row("Game", listing["game"]),
+        ) +
+        _btn(f"{FRONTEND_URL}/listing/{listing['id']}", "View listing"))
+    await send_email(seller_email, f"Your listing is live — {listing['title']}", html)
+
+async def notify_seller_listing_rejected(seller_email: str, listing: dict):
+    html = _notif_html("Listing rejected",
+        _intro("Your listing has been reviewed and could not be approved. Please ensure your listing follows our guidelines and resubmit.") +
+        _tbl(_row("Title", listing["title"])) +
+        _btn(f"{FRONTEND_URL}/dashboard", "Go to dashboard"))
+    await send_email(seller_email, f"Listing not approved — {listing['title']}", html)
+
+async def notify_buyer_purchase_confirmed(buyer_email: str, order: dict):
+    deadline = datetime.fromisoformat(order["handover_deadline"]).strftime("%Y-%m-%d %H:%M UTC")
+    html = _notif_html("Purchase confirmed — funds in escrow",
+        _intro("Your purchase is secured. Funds are held in escrow and will only be released once you confirm successful account access.") +
+        _tbl(
+            _row("Order", f"#{order['id'][:8]}"),
+            _row("Listing", order["listing_snapshot"]["title"]),
+            _row("Amount paid", f"${order.get('total_charged', order['amount']):.2f}"),
+            _row("Escrow amount", f"${order['amount']:.2f}"),
+            _row("Handover deadline", deadline),
+        ) +
+        _btn(f"{FRONTEND_URL}/order/{order['id']}", "View order"))
+    await send_email(buyer_email, f"Purchase confirmed — {order['listing_snapshot']['title']}", html)
+
+async def notify_seller_listing_sold(seller_email: str, order: dict):
+    deadline = datetime.fromisoformat(order["handover_deadline"]).strftime("%Y-%m-%d %H:%M UTC")
+    html = _notif_html("Your listing sold!",
+        _intro("A buyer has purchased your listing. You have 65 minutes to assist with the credential handover via the order chat.") +
+        _tbl(
+            _row("Order", f"#{order['id'][:8]}"),
+            _row("Listing", order["listing_snapshot"]["title"]),
+            _row("Amount", f"${order['amount']:.2f}"),
+            _row("Buyer", f"@{order['buyer_username']}"),
+            _row("Deadline", deadline),
+        ) +
+        _btn(f"{FRONTEND_URL}/order/{order['id']}", "Go to order chat"))
+    await send_email(seller_email, f"Your listing sold — {order['listing_snapshot']['title']}", html)
+
+async def notify_seller_funds_released(seller_email: str, order: dict):
+    html = _notif_html("Funds released to your wallet",
+        _intro("The buyer has confirmed account access. Your earnings are now available in your wallet.") +
+        _tbl(
+            _row("Order", f"#{order['id'][:8]}"),
+            _row("Listing", order["listing_snapshot"]["title"]),
+            _row("Amount credited", f"${order['amount']:.2f}"),
+        ) +
+        _btn(f"{FRONTEND_URL}/dashboard", "View wallet"))
+    await send_email(seller_email, f"${order['amount']:.2f} added to your wallet", html)
+
+async def notify_dispute_opened(order: dict, raised_by_username: str):
+    buyer = await db.users.find_one({"id": order["buyer_id"]}, {"_id": 0, "email": 1})
+    seller = await db.users.find_one({"id": order["seller_id"]}, {"_id": 0, "email": 1})
+    order_url = f"{FRONTEND_URL}/order/{order['id']}"
+    details = _tbl(
+        _row("Order", f"#{order['id'][:8]}"),
+        _row("Listing", order["listing_snapshot"]["title"]),
+        _row("Amount", f"${order['amount']:.2f}"),
+        _row("Raised by", f"@{raised_by_username}"),
+    )
+    for u in [buyer, seller]:
+        if u:
+            html = _notif_html("Dispute opened",
+                _intro("A dispute has been opened on your order. An admin will review and settle it shortly.") +
+                details + _btn(order_url, "View order"))
+            await send_email(u["email"], f"Dispute opened — order #{order['id'][:8]}", html)
+    admin_html = _notif_html("Dispute requires your review",
+        _intro("A dispute has been opened and requires your settlement.") +
+        _tbl(
+            _row("Order", f"#{order['id'][:8]}"),
+            _row("Listing", order["listing_snapshot"]["title"]),
+            _row("Buyer", f"@{order['buyer_username']}"),
+            _row("Seller", f"@{order['seller_username']}"),
+            _row("Amount", f"${order['amount']:.2f}"),
+            _row("Raised by", f"@{raised_by_username}"),
+        ) + _btn(f"{FRONTEND_URL}/admin", "Go to admin dashboard"))
+    await send_email(ADMIN_EMAIL, f"Dispute opened — order #{order['id'][:8]}", admin_html)
+
+async def notify_dispute_settled(order: dict, action: str, note: str):
+    buyer = await db.users.find_one({"id": order["buyer_id"]}, {"_id": 0, "email": 1})
+    seller = await db.users.find_one({"id": order["seller_id"]}, {"_id": 0, "email": 1})
+    refund_amount = order.get("total_charged") or order["amount"]
+    if action == "release":
+        buyer_msg = "The dispute has been resolved. Funds have been released to the seller."
+        seller_msg = "The dispute has been resolved in your favour. Funds have been released to your wallet."
+        outcome = f"Released ${order['amount']:.2f} to seller"
+    else:
+        buyer_msg = f"The dispute has been resolved in your favour. ${refund_amount:.2f} has been refunded to your wallet."
+        seller_msg = "The dispute has been resolved. The buyer has been refunded."
+        outcome = f"Refunded ${refund_amount:.2f} to buyer"
+    note_html = _intro(f"Admin note: {note}") if note else ""
+    for u, msg in [(buyer, buyer_msg), (seller, seller_msg)]:
+        if u:
+            html = _notif_html("Dispute settled", _intro(msg) +
+                _tbl(_row("Order", f"#{order['id'][:8]}"), _row("Listing", order["listing_snapshot"]["title"]), _row("Outcome", outcome)) +
+                note_html + _btn(f"{FRONTEND_URL}/order/{order['id']}", "View order"))
+            await send_email(u["email"], f"Dispute settled — order #{order['id'][:8]}", html)
+
+async def notify_admin_withdrawal_requested(w: dict):
+    html = _notif_html("Withdrawal request — action required",
+        _intro("A seller has requested a withdrawal that requires your approval.") +
+        _tbl(
+            _row("User", f"@{w['username']}"),
+            _row("Amount", f"${w['amount_usd']:.2f} USD"),
+            _row("Payout", f"₦{w['payout_ngn']:,.2f} NGN"),
+            _row("Bank", w["bank_name"]),
+            _row("Account", w["account_number"]),
+            _row("Account name", w["account_name"]),
+        ) + _btn(f"{FRONTEND_URL}/admin", "Go to admin dashboard"))
+    await send_email(ADMIN_EMAIL, f"Withdrawal request — @{w['username']} ${w['amount_usd']:.2f}", html)
+
+async def notify_seller_withdrawal_processing(seller_email: str, w: dict):
+    html = _notif_html("Withdrawal processing",
+        _intro("Your withdrawal has been approved and is being processed. Funds will arrive in your bank account shortly.") +
+        _tbl(
+            _row("Amount", f"${w['amount_usd']:.2f} USD"),
+            _row("Payout", f"₦{w['payout_ngn']:,.2f} NGN"),
+            _row("Bank", w["bank_name"]),
+            _row("Account", w["account_number"]),
+        ) + _btn(f"{FRONTEND_URL}/dashboard", "View wallet"))
+    await send_email(seller_email, "Your withdrawal is being processed", html)
+
+async def notify_seller_withdrawal_completed(seller_email: str, w: dict):
+    html = _notif_html("Withdrawal completed",
+        _intro("Your withdrawal has been completed successfully. Funds have been sent to your bank account.") +
+        _tbl(
+            _row("Amount", f"${w['amount_usd']:.2f} USD"),
+            _row("Paid out", f"₦{w['payout_ngn']:,.2f} NGN"),
+            _row("Bank", w["bank_name"]),
+            _row("Account", w["account_number"]),
+        ) + _btn(f"{FRONTEND_URL}/dashboard", "View wallet"))
+    await send_email(seller_email, f"₦{w['payout_ngn']:,.2f} sent to your bank account", html)
+
+async def notify_seller_withdrawal_failed(seller_email: str, w: dict, reason: str):
+    html = _notif_html("Withdrawal failed — funds returned",
+        _intro("Unfortunately your withdrawal could not be completed. Your funds have been returned to your Lootra wallet automatically.") +
+        _tbl(
+            _row("Amount returned", f"${w['amount_usd']:.2f} USD"),
+            _row("Bank", w["bank_name"]),
+            _row("Reason", reason),
+        ) + _btn(f"{FRONTEND_URL}/dashboard", "Try again"))
+    await send_email(seller_email, "Withdrawal failed — funds returned to wallet", html)
+
+async def notify_seller_withdrawal_rejected(seller_email: str, w: dict, reason: str):
+    html = _notif_html("Withdrawal rejected — funds returned",
+        _intro("Your withdrawal request has been rejected by admin. Your funds have been returned to your Lootra wallet.") +
+        _tbl(
+            _row("Amount returned", f"${w['amount_usd']:.2f} USD"),
+            _row("Reason", reason),
+        ) + _btn(f"{FRONTEND_URL}/dashboard", "View wallet"))
+    await send_email(seller_email, "Withdrawal rejected — funds returned to wallet", html)
+
+async def notify_deadline_reminder(order: dict):
+    buyer = await db.users.find_one({"id": order["buyer_id"]}, {"_id": 0, "email": 1})
+    seller = await db.users.find_one({"id": order["seller_id"]}, {"_id": 0, "email": 1})
+    deadline = datetime.fromisoformat(order["handover_deadline"]).strftime("%Y-%m-%d %H:%M UTC")
+    details = _tbl(
+        _row("Order", f"#{order['id'][:8]}"),
+        _row("Listing", order["listing_snapshot"]["title"]),
+        _row("Buyer", f"@{order['buyer_username']}"),
+        _row("Seller", f"@{order['seller_username']}"),
+        _row("Deadline", deadline),
+    )
+    for u in [buyer, seller]:
+        if u:
+            html = _notif_html("Handover deadline approaching",
+                _intro("Reminder: the 65-minute credential handover window is halfway through. Please complete the handover before the deadline or a dispute will be auto-triggered.") +
+                details + _btn(f"{FRONTEND_URL}/order/{order['id']}", "Go to order chat"))
+            await send_email(u["email"], f"⏳ ~32 minutes left — order #{order['id'][:8]}", html)
+    admin_html = _notif_html("Handover deadline approaching",
+        _intro("An order's handover window is halfway through. Monitor and intervene if needed.") +
+        details + _btn(f"{FRONTEND_URL}/admin", "Go to admin dashboard"))
+    await send_email(ADMIN_EMAIL, f"Handover deadline in ~32 min — order #{order['id'][:8]}", admin_html)
 
 @api.post("/auth/forgot-password")
 async def forgot_password(data: ForgotPasswordIn, request: Request):
@@ -672,6 +901,7 @@ async def create_listing(data: ListingCreate, user: dict = Depends(get_current_u
     await audit("listing.create", user["id"], lid)
     doc.pop("credentials_encrypted", None)
     doc.pop("_id", None)
+    await _safe_notify(notify_admin_new_listing(doc))
     return doc
 
 @api.get("/listings")
@@ -807,8 +1037,12 @@ async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
     }
     await db.orders.insert_one(order)
     await audit("order.purchase", user["id"], oid, {"amount": listing["price"]})
-    # Notify admin
+    # Notify buyer and seller
     seller = await db.users.find_one({"id": listing["seller_id"]}, {"_id": 0})
+    await _safe_notify(notify_buyer_purchase_confirmed(user["email"], order))
+    if seller:
+        await _safe_notify(notify_seller_listing_sold(seller["email"], order))
+    # Notify admin
     try:
         await send_email(
             ADMIN_EMAIL,
@@ -891,6 +1125,9 @@ async def confirm_order(order_id: str, body: ConfirmIn = ConfirmIn(), user: dict
     }})
     await credit_seller_wallet(o)
     await audit("order.confirmed_released", user["id"], order_id)
+    seller = await db.users.find_one({"id": o["seller_id"]}, {"_id": 0, "email": 1})
+    if seller:
+        await _safe_notify(notify_seller_funds_released(seller["email"], o))
     return {"ok": True}
 
 @api.post("/orders/{order_id}/dispute")
@@ -906,6 +1143,7 @@ async def dispute_order(order_id: str, body: DisputeIn, user: dict = Depends(get
         "status": "DISPUTED", "dispute_reason": body.reason, "timeline": timeline, "updated_at": now_utc().isoformat(),
     }})
     await audit("order.disputed", user["id"], order_id)
+    await _safe_notify(notify_dispute_opened(o, user["username"]))
     return {"ok": True}
 
 @api.post("/orders/{order_id}/complaint")
@@ -924,6 +1162,7 @@ async def complaint_order(order_id: str, body: ComplaintIn, user: dict = Depends
         "status": "DISPUTED", "dispute_reason": body.reason, "timeline": timeline, "updated_at": now_utc().isoformat(),
     }})
     await audit("order.complaint", user["id"], order_id)
+    await _safe_notify(notify_dispute_opened(o, user["username"]))
     return {"ok": True}
 
 @api.post("/admin/orders/{order_id}/settle")
@@ -950,6 +1189,7 @@ async def admin_settle(order_id: str, body: SettleIn, admin: dict = Depends(requ
         refund_amount = o.get("total_charged") or o["amount"]
         await db.users.update_one({"id": o["buyer_id"]}, {"$inc": {"balance": refund_amount}})
         await audit("order.admin_refund", admin["id"], order_id, {"amount": refund_amount})
+    await _safe_notify(notify_dispute_settled(o, body.action, body.note))
     return {"ok": True}
 
 @api.post("/orders/{order_id}/review")
@@ -1312,6 +1552,10 @@ async def request_withdrawal(body: WithdrawIn, user: dict = Depends(get_current_
         "status": "pending", "created_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
     })
     await audit("wallet.withdraw_request", user["id"], wid, {"amount_usd": body.amount_usd})
+    withdrawal_doc = {"id": wid, "username": user["username"], "amount_usd": body.amount_usd,
+        "payout_usd": payout_usd, "payout_ngn": payout_ngn, "bank_name": body.bank_name,
+        "account_number": body.account_number, "account_name": body.account_name}
+    await _safe_notify(notify_admin_withdrawal_requested(withdrawal_doc))
     return {"ok": True, "id": wid, "payout_usd": payout_usd, "payout_ngn": payout_ngn}
 
 @api.get("/wallet/withdrawals")
@@ -1386,6 +1630,9 @@ async def admin_approve_withdrawal(wid: str, admin: dict = Depends(require_admin
         "approved_by": admin["id"], "approved_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
     }})
     await audit("wallet.withdrawal_approved", admin["id"], wid, {"payout_ngn": w["payout_ngn"]})
+    seller = await db.users.find_one({"id": w["user_id"]}, {"_id": 0, "email": 1})
+    if seller:
+        await _safe_notify(notify_seller_withdrawal_processing(seller["email"], w))
     return {"ok": True}
 
 @api.post("/admin/withdrawals/{wid}/reject")
@@ -1406,6 +1653,9 @@ async def admin_reject_withdrawal(wid: str, body: WithdrawalRejectIn, admin: dic
         "rejected_by": admin["id"], "rejected_at": now_utc().isoformat(), "updated_at": now_utc().isoformat(),
     }})
     await audit("wallet.withdrawal_rejected", admin["id"], wid, {"reason": body.reason})
+    seller = await db.users.find_one({"id": w["user_id"]}, {"_id": 0, "email": 1})
+    if seller:
+        await _safe_notify(notify_seller_withdrawal_rejected(seller["email"], w, body.reason))
     return {"ok": True}
 
 @api.get("/admin/withdrawals")
@@ -1471,14 +1721,22 @@ async def admin_approve(listing_id: str, admin: dict = Depends(require_admin)):
         "status": "active", "verified": True, "updated_at": now_utc().isoformat(),
     }})
     await audit("listing.approve", admin["id"], listing_id)
+    seller = await db.users.find_one({"id": l["seller_id"]}, {"_id": 0, "email": 1})
+    if seller:
+        await _safe_notify(notify_seller_listing_approved(seller["email"], l))
     return {"ok": True}
 
 @api.post("/admin/listings/{listing_id}/reject")
 async def admin_reject(listing_id: str, admin: dict = Depends(require_admin)):
+    l = await db.listings.find_one({"id": listing_id})
     await db.listings.update_one({"id": listing_id}, {"$set": {
         "status": "rejected", "updated_at": now_utc().isoformat(),
     }})
     await audit("listing.reject", admin["id"], listing_id)
+    if l:
+        seller = await db.users.find_one({"id": l["seller_id"]}, {"_id": 0, "email": 1})
+        if seller:
+            await _safe_notify(notify_seller_listing_rejected(seller["email"], l))
     return {"ok": True}
 
 @api.get("/admin/orders")
@@ -1504,6 +1762,7 @@ async def admin_refund(order_id: str, admin: dict = Depends(require_admin)):
     # Re-list the listing
     await db.listings.update_one({"id": o["listing_id"]}, {"$set": {"status": "active"}})
     await audit("order.refund", admin["id"], order_id, {"amount": refund_amount})
+    await _safe_notify(notify_dispute_settled(o, "refund", ""))
     return {"ok": True}
 
 @api.get("/admin/vault/{listing_id}")
@@ -1591,6 +1850,13 @@ async def flutterwave_webhook(request: Request):
                 await db.wallet_credits.update_many({"order_id": {"$in": w.get("credit_ids", [])}, "withdrawn": True}, {"$set": {"withdrawn": False}})
             await db.withdrawals.update_one({"flw_reference": ref}, {"$set": update})
             await audit(f"wallet.withdrawal_{new_status}", w["user_id"], w["id"], {})
+            seller = await db.users.find_one({"id": w["user_id"]}, {"_id": 0, "email": 1})
+            if seller:
+                if new_status == "completed":
+                    await _safe_notify(notify_seller_withdrawal_completed(seller["email"], w))
+                else:
+                    reason = tx.get("complete_message", "Transfer failed")
+                    await _safe_notify(notify_seller_withdrawal_failed(seller["email"], w, reason))
     return {"status": "ok"}
 
 @app.post("/api/webhooks/nowpayments")
