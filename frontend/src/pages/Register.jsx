@@ -1,22 +1,33 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { CheckCircle, Mail } from "lucide-react";
+import { Mail } from "lucide-react";
+import { Turnstile } from "@marsidev/react-turnstile";
 import { api, formatError } from "../lib/api";
+
+const SITE_KEY = "0x4AAAAAADT-fceKK6DFxAM7";
 
 export default function Register() {
   const [form, setForm] = useState({ email: "", username: "", password: "" });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [token, setToken] = useState("");
+  const turnstileRef = useRef(null);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!token) {
+      toast.error("Please wait for the security check to complete.");
+      return;
+    }
     setBusy(true);
     try {
-      await api.post("/auth/register", form);
+      await api.post("/auth/register", { ...form, cf_token: token });
       setDone(true);
     } catch (err) {
       toast.error(formatError(err));
+      turnstileRef.current?.reset();
+      setToken("");
     } finally {
       setBusy(false);
     }
@@ -65,7 +76,14 @@ export default function Register() {
           <input type="password" className="lootra-input" required minLength={8} value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="register-password" />
         </div>
-        <button type="submit" disabled={busy} className="lootra-btn-primary w-full" data-testid="register-submit">
+        <Turnstile
+          ref={turnstileRef}
+          siteKey={SITE_KEY}
+          onSuccess={setToken}
+          onExpire={() => setToken("")}
+          options={{ theme: "dark" }}
+        />
+        <button type="submit" disabled={busy || !token} className="lootra-btn-primary w-full" data-testid="register-submit">
           {busy ? "Creating…" : "Create account"}
         </button>
       </form>

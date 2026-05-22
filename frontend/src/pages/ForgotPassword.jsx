@@ -1,22 +1,33 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle } from "lucide-react";
+import { Turnstile } from "@marsidev/react-turnstile";
 import { api, formatError } from "../lib/api";
+
+const SITE_KEY = "0x4AAAAAADT-fceKK6DFxAM7";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [token, setToken] = useState("");
+  const turnstileRef = useRef(null);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!token) {
+      toast.error("Please wait for the security check to complete.");
+      return;
+    }
     setBusy(true);
     try {
-      await api.post("/auth/forgot-password", { email });
+      await api.post("/auth/forgot-password", { email, cf_token: token });
       setSent(true);
     } catch (err) {
       toast.error(formatError(err));
+      turnstileRef.current?.reset();
+      setToken("");
     } finally {
       setBusy(false);
     }
@@ -60,7 +71,14 @@ export default function ForgotPassword() {
             autoFocus
           />
         </div>
-        <button type="submit" disabled={busy} className="lootra-btn-primary w-full">
+        <Turnstile
+          ref={turnstileRef}
+          siteKey={SITE_KEY}
+          onSuccess={setToken}
+          onExpire={() => setToken("")}
+          options={{ theme: "dark" }}
+        />
+        <button type="submit" disabled={busy || !token} className="lootra-btn-primary w-full">
           {busy ? "Sending…" : "Send reset link"}
         </button>
       </form>

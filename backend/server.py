@@ -41,6 +41,7 @@ NOWPAYMENTS_IPN_SECRET = os.environ.get("NOWPAYMENTS_IPN_SECRET", "")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "Lootra <noreply@lootra.org>")
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 
 SUPPORTED_CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS"]
 FALLBACK_RATES = {"USD": 1.0, "CAD": 1.37, "GBP": 0.79, "EUR": 0.92, "NGN": 1550.0, "GHS": 15.5}
@@ -201,6 +202,18 @@ async def audit(action: str, user_id: Optional[str], target: str, meta: Optional
         "created_at": now_utc().isoformat(),
     })
 
+async def _verify_turnstile(token: str, ip: str = ""):
+    if not TURNSTILE_SECRET_KEY:
+        return  # skip in dev if not configured
+    async with httpx.AsyncClient(timeout=10) as cl:
+        r = await cl.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": TURNSTILE_SECRET_KEY, "response": token, "remoteip": ip},
+        )
+    result = r.json()
+    if not result.get("success"):
+        raise HTTPException(400, "Security check failed — please try again")
+
 async def _check_rate_limit(ip: str, action: str, limit: int = 10, window_minutes: int = 60):
     key = f"{action}:{ip}"
     rec = await db.login_attempts.find_one({"identifier": key})
@@ -225,6 +238,7 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     username: str = Field(min_length=3, max_length=30)
+    cf_token: str = ""
 
 class LoginIn(BaseModel):
     email: EmailStr
@@ -413,6 +427,7 @@ async def _order_scheduler():
 @api.post("/auth/register")
 async def register(data: RegisterIn, request: Request, response: Response):
     ip = request.client.host if request.client else "unknown"
+    await _verify_turnstile(data.cf_token, ip)
     await _check_rate_limit(ip, "register", limit=10, window_minutes=60)
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
@@ -471,6 +486,7 @@ async def login(data: LoginIn, request: Request, response: Response):
 
 class ForgotPasswordIn(BaseModel):
     email: EmailStr
+    cf_token: str = ""
 
 class ResetPasswordIn(BaseModel):
     token: str
@@ -515,6 +531,7 @@ async def send_reset_email(to_email: str, token: str):
 @api.post("/auth/forgot-password")
 async def forgot_password(data: ForgotPasswordIn, request: Request):
     ip = request.client.host if request.client else "unknown"
+    await _verify_turnstile(data.cf_token, ip)
     await _check_rate_limit(ip, "forgot-password", limit=5, window_minutes=60)
     user = await db.users.find_one({"email": data.email.lower()})
     if not user:
