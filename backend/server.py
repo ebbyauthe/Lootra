@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import re
 import uuid
 import logging
 import secrets
@@ -200,6 +201,25 @@ async def audit(action: str, user_id: Optional[str], target: str, meta: Optional
         "created_at": now_utc().isoformat(),
     })
 
+async def _check_rate_limit(ip: str, action: str, limit: int = 10, window_minutes: int = 60):
+    key = f"{action}:{ip}"
+    rec = await db.login_attempts.find_one({"identifier": key})
+    now = now_utc()
+    if rec:
+        if rec.get("locked_until") and datetime.fromisoformat(rec["locked_until"]) > now:
+            raise HTTPException(429, "Too many requests — please try again later.")
+        if rec.get("last_at"):
+            last = datetime.fromisoformat(rec["last_at"])
+            if (now - last).total_seconds() > window_minutes * 60:
+                await db.login_attempts.delete_one({"identifier": key})
+                rec = None
+    attempts = (rec or {}).get("attempts", 0) + 1
+    update = {"attempts": attempts, "last_at": now.isoformat()}
+    if attempts >= limit:
+        update["locked_until"] = (now + timedelta(minutes=window_minutes)).isoformat()
+        update["attempts"] = 0
+    await db.login_attempts.update_one({"identifier": key}, {"$set": update}, upsert=True)
+
 # ---------------- Schemas ----------------
 class RegisterIn(BaseModel):
     email: EmailStr
@@ -391,7 +411,9 @@ async def _order_scheduler():
 
 # ---------------- Auth ----------------
 @api.post("/auth/register")
-async def register(data: RegisterIn, response: Response):
+async def register(data: RegisterIn, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(ip, "register", limit=10, window_minutes=60)
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -491,7 +513,9 @@ async def send_reset_email(to_email: str, token: str):
     await send_email(to_email, "Reset your Lootra password", html)
 
 @api.post("/auth/forgot-password")
-async def forgot_password(data: ForgotPasswordIn):
+async def forgot_password(data: ForgotPasswordIn, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(ip, "forgot-password", limit=5, window_minutes=60)
     user = await db.users.find_one({"email": data.email.lower()})
     if not user:
         return {"ok": True}
@@ -511,7 +535,7 @@ async def reset_password(data: ResetPasswordIn):
         await db.password_resets.delete_one({"token": data.token})
         raise HTTPException(400, "Reset link has expired")
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
-    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password": hashed}})
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": hashed}})
     await db.password_resets.delete_one({"token": data.token})
     await audit("auth.password_reset", rec["user_id"], "user", {})
     return {"ok": True}
@@ -529,7 +553,9 @@ async def verify_email(token: str):
     return {"ok": True}
 
 @api.post("/auth/resend-verification")
-async def resend_verification(data: ForgotPasswordIn):
+async def resend_verification(data: ForgotPasswordIn, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(ip, "resend-verification", limit=5, window_minutes=60)
     user = await db.users.find_one({"email": data.email.lower()})
     if not user or user.get("email_verified", False):
         return {"ok": True}
@@ -642,10 +668,11 @@ async def get_listings(
 ):
     flt = {"status": "active"}
     if q:
+        safe_q = re.escape(q[:50])
         flt["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}},
-            {"game": {"$regex": q, "$options": "i"}},
+            {"title": {"$regex": safe_q, "$options": "i"}},
+            {"description": {"$regex": safe_q, "$options": "i"}},
+            {"game": {"$regex": safe_q, "$options": "i"}},
         ]
     if game: flt["game"] = game
     if platform: flt["platform"] = platform
@@ -710,22 +737,34 @@ async def get_watchlist(user: dict = Depends(get_current_user)):
 # OR -> DISPUTED -> REFUNDED
 @api.post("/orders/{listing_id}/purchase")
 async def purchase(listing_id: str, user: dict = Depends(get_current_user)):
+    # Read listing first to get price and validate seller
     listing = await db.listings.find_one({"id": listing_id})
     if not listing:
         raise HTTPException(404, "Listing not found")
-    if listing["status"] != "active":
-        raise HTTPException(400, "Listing not available")
     if listing["seller_id"] == user["id"]:
         raise HTTPException(400, "Cannot buy your own listing")
+    if listing["status"] != "active":
+        raise HTTPException(400, "Listing not available")
     config = await get_fee_config()
     platform_fee = round(listing["price"] * config["buyer_fee_rate"], 2)
     total_charge = round(listing["price"] + platform_fee, 2)
-    if user.get("balance", 0) < total_charge:
+    # Atomically claim listing — prevents two buyers purchasing simultaneously
+    claimed = await db.listings.find_one_and_update(
+        {"id": listing_id, "status": "active"},
+        {"$set": {"status": "sold", "updated_at": now_utc().isoformat()}},
+    )
+    if not claimed:
+        raise HTTPException(400, "Listing is no longer available")
+    # Atomically debit buyer — only succeeds if balance is sufficient
+    debit_result = await db.users.update_one(
+        {"id": user["id"], "balance": {"$gte": total_charge}},
+        {"$inc": {"balance": -total_charge}},
+    )
+    if debit_result.matched_count == 0:
+        # Restore listing to active since we couldn't charge the buyer
+        await db.listings.update_one({"id": listing_id}, {"$set": {"status": "active", "updated_at": now_utc().isoformat()}})
         raise HTTPException(400, f"Insufficient balance. Total cost is ${total_charge:.2f} (includes {int(config['buyer_fee_rate']*100)}% platform fee). Top up your wallet.")
     oid = str(uuid.uuid4())
-    # Debit buyer (listing price + platform fee); listing price held in escrow
-    await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -total_charge}})
-    await db.listings.update_one({"id": listing_id}, {"$set": {"status": "sold", "updated_at": now_utc().isoformat()}})
     deadline = now_utc() + timedelta(minutes=65)
     order = {
         "id": oid,
@@ -994,7 +1033,6 @@ async def get_profile(username: str):
     return {
         "id": u["id"],
         "username": u["username"],
-        "role": u.get("role", "user"),
         "trust_score": u.get("trust_score", 0),
         "sales_count": u.get("sales_count", 0),
         "rating": u.get("rating", 0.0),
@@ -1205,17 +1243,37 @@ async def request_withdrawal(body: WithdrawIn, user: dict = Depends(get_current_
     ngn_rate = rates.get("NGN", 1550.0)
     payout_ngn = round(payout_usd * ngn_rate, 2)
     wid = str(uuid.uuid4())
-    # Mark credits as withdrawn (FIFO)
+    # Atomically consume credits (FIFO) — find_one_and_update with withdrawn:False prevents
+    # two simultaneous withdrawals from consuming the same credits
     remaining = body.amount_usd
+    credit_ids_claimed = []
     for credit in sorted(available_credits, key=lambda c: c["withdrawable_after"]):
         if remaining <= 0:
             break
         use = min(credit["amount"], remaining)
         if use >= credit["amount"]:
-            await db.wallet_credits.update_one({"id": credit["id"]}, {"$set": {"withdrawn": True}})
+            result = await db.wallet_credits.find_one_and_update(
+                {"id": credit["id"], "withdrawn": False},
+                {"$set": {"withdrawn": True}},
+            )
+            if result:
+                credit_ids_claimed.append(credit["id"])
+                remaining -= use
         else:
-            await db.wallet_credits.update_one({"id": credit["id"]}, {"$inc": {"amount": -use}})
-        remaining -= use
+            result = await db.wallet_credits.find_one_and_update(
+                {"id": credit["id"], "withdrawn": False, "amount": {"$gte": use}},
+                {"$inc": {"amount": -use}},
+            )
+            if result:
+                remaining -= use
+    if remaining > 0.001:
+        # Race condition — undo any credits already claimed and abort
+        if credit_ids_claimed:
+            await db.wallet_credits.update_many(
+                {"id": {"$in": credit_ids_claimed}},
+                {"$set": {"withdrawn": False}},
+            )
+        raise HTTPException(400, "Insufficient available balance — please try again")
     await db.users.update_one({"id": user["id"]}, {"$inc": {"balance": -body.amount_usd}})
     await db.withdrawals.insert_one({
         "id": wid, "user_id": user["id"], "username": user["username"],
@@ -1472,7 +1530,9 @@ app.include_router(api)
 # ---------------- Webhooks ----------------
 @app.post("/api/webhooks/flutterwave")
 async def flutterwave_webhook(request: Request):
-    if FLW_WEBHOOK_HASH:
+    if not FLW_WEBHOOK_HASH:
+        log.critical("FLW_WEBHOOK_HASH not set — webhook signature validation is DISABLED. Set this env var immediately.")
+    else:
         sig = request.headers.get("verif-hash", "")
         if sig != FLW_WEBHOOK_HASH:
             raise HTTPException(401, "Invalid webhook signature")
@@ -1481,10 +1541,13 @@ async def flutterwave_webhook(request: Request):
         tx = body.get("data", {})
         if tx.get("status") == "successful":
             tx_ref = tx.get("tx_ref", "")
-            pending = await db.pending_topups.find_one({"tx_ref": tx_ref})
-            if pending and not pending.get("credited"):
+            # Atomically mark as credited — prevents double-credit if FLW sends the webhook twice
+            pending = await db.pending_topups.find_one_and_update(
+                {"tx_ref": tx_ref, "credited": False},
+                {"$set": {"credited": True}},
+            )
+            if pending:
                 await db.users.update_one({"id": pending["user_id"]}, {"$inc": {"balance": pending["usd_amount"]}})
-                await db.pending_topups.update_one({"tx_ref": tx_ref}, {"$set": {"credited": True}})
                 await audit("wallet.fiat_topup_webhook", pending["user_id"], tx_ref, {"usd_amount": pending["usd_amount"]})
     if body.get("event") in ("transfer.completed", "transfer.failed"):
         tx = body.get("data", {})
@@ -1513,13 +1576,13 @@ async def nowpayments_webhook(request: Request):
     import json as _json
     data = _json.loads(body_bytes)
     if data.get("payment_status") in ("finished", "confirmed"):
-        pt = await db.crypto_topups.find_one({"payment_id": str(data.get("payment_id", ""))})
-        if pt and not pt.get("credited"):
+        # Atomically mark as credited — prevents double-credit on repeated webhook delivery
+        pt = await db.crypto_topups.find_one_and_update(
+            {"payment_id": str(data.get("payment_id", "")), "credited": False},
+            {"$set": {"credited": True, "status": "finished"}},
+        )
+        if pt:
             await db.users.update_one({"id": pt["user_id"]}, {"$inc": {"balance": pt["amount_usd"]}})
-            await db.crypto_topups.update_one(
-                {"payment_id": str(data["payment_id"])},
-                {"$set": {"credited": True, "status": "finished"}},
-            )
             await audit("wallet.crypto_topup", pt["user_id"], str(data["payment_id"]), {"amount_usd": pt["amount_usd"]})
     return {"status": "ok"}
 
