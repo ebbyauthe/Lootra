@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Wallet, LogOut, ShieldCheck, Menu, X, ChevronDown, Plus } from "lucide-react";
+import { Wallet, LogOut, Menu, X, ChevronDown, Plus } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
 import logoSvg from "../assets/logo.svg";
@@ -145,7 +145,7 @@ export default function Layout({ children }) {
       <footer className="border-t border-[#2A2A2A] mt-16">
         <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-neutral-500 font-mono">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-[#CCFF00]" />
+            <img src={logoSvg} alt="Lootra" className="w-4 h-4" />
             <span>lootra // escrow-protected account marketplace</span>
           </div>
           <div className="flex items-center gap-4">
