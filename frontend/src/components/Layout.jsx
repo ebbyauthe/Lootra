@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { Shield, Wallet, LogOut, ShieldCheck, Menu, X, ChevronDown, Plus } from "lucide-react";
+import { Wallet, LogOut, ShieldCheck, Menu, X, ChevronDown, Plus } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency, CURRENCIES } from "../context/CurrencyContext";
+import logoSvg from "../assets/logo.svg";
 
 const navItem = ({ isActive }) =>
   `px-4 py-2 text-sm tracking-tight transition-colors ${
@@ -64,10 +65,8 @@ export default function Layout({ children }) {
       <header className="border-b border-[#2A2A2A] sticky top-0 z-30 bg-[#0A0A0A]/90 backdrop-blur">
         <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-2" data-testid="logo-link">
-            <div className="w-8 h-8 bg-[#CCFF00] flex items-center justify-center">
-              <Shield className="w-4 h-4 text-black" strokeWidth={2.5} />
-            </div>
-            <span className="font-medium text-lg tracking-tight">LOOTRA</span>
+            <img src={logoSvg} alt="Lootra" className="w-8 h-8" />
+            <span className="font-medium text-lg tracking-tight">lootra</span>
             <span className="hidden sm:inline-block lootra-badge ml-2" data-testid="badge-beta">BETA</span>
           </Link>
 
