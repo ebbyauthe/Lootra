@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ShieldCheck, Lock, Eye, Zap, ArrowRight } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ListingCard from "../components/ListingCard";
@@ -57,6 +58,12 @@ export default function Landing() {
   };
 
   return (
+    <>
+    <Helmet>
+      <title>Lootra — Buy & Sell Gaming Accounts Safely</title>
+      <meta name="description" content="Lootra is an escrow-protected marketplace for buying and selling gaming accounts and in-game items. Safe, fast, and secure transactions for gamers." />
+      <link rel="canonical" href="https://lootra.org/" />
+    </Helmet>
     <div className="space-y-24 animate-fade-in">
       {/* Hero */}
       <section className="grid md:grid-cols-12 gap-8 items-center pt-8" data-testid="hero-section">
@@ -194,5 +201,6 @@ export default function Landing() {
         </div>
       </section>
     </div>
+    </>
   );
 }

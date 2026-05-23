@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ShieldCheck, Lock, MapPin, Trophy, Star, Heart } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 import { api, formatError } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useCurrency } from "../context/CurrencyContext";
@@ -48,6 +49,12 @@ export default function ListingDetail() {
   const screenshots = listing.screenshots?.length ? listing.screenshots : [PLACEHOLDER];
 
   return (
+    <>
+    <Helmet>
+      <title>{listing.title} — Lootra</title>
+      <meta name="description" content={`Buy ${listing.title} on Lootra. ${listing.game} account for sale — escrow-protected, secure delivery guaranteed.`} />
+      <link rel="canonical" href={`https://lootra.org/listing/${id}`} />
+    </Helmet>
     <div className="grid lg:grid-cols-[1fr_360px] gap-8 animate-fade-in" data-testid="listing-detail">
       <div className="space-y-6">
         <div>
@@ -168,5 +175,6 @@ export default function ListingDetail() {
         </div>
       </aside>
     </div>
+    </>
   );
 }

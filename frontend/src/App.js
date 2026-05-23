@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
+import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "./context/AuthContext";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import Layout from "./components/Layout";
@@ -26,6 +27,7 @@ import ResetWithdrawalPin from "./pages/ResetWithdrawalPin";
 
 export default function App() {
   return (
+    <HelmetProvider>
     <AuthProvider>
       <CurrencyProvider>
         <BrowserRouter>
@@ -57,5 +59,6 @@ export default function App() {
         }} />
       </CurrencyProvider>
     </AuthProvider>
+    </HelmetProvider>
   );
 }

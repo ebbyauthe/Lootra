@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { SlidersHorizontal, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Helmet } from "react-helmet-async";
 import { api } from "../lib/api";
 import ListingCard from "../components/ListingCard";
 
@@ -31,6 +32,12 @@ export default function Browse() {
   const clearFilters = () => { setFilters(DEFAULT_FILTERS); };
 
   return (
+    <>
+    <Helmet>
+      <title>Browse Gaming Accounts — Lootra</title>
+      <meta name="description" content="Browse gaming accounts and in-game items for sale on Lootra. Filter by game, price, and rank. Every purchase is escrow-protected." />
+      <link rel="canonical" href="https://lootra.org/browse" />
+    </Helmet>
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
@@ -132,5 +139,6 @@ export default function Browse() {
         </div>
       </div>
     </div>
+    </>
   );
 }
