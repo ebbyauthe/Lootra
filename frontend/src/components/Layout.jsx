@@ -146,7 +146,7 @@ export default function Layout({ children }) {
         <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-neutral-500 font-mono">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-[#CCFF00]" />
-            <span>LOOTRA // ESCROW-PROTECTED ACCOUNT MARKETPLACE</span>
+            <span>lootra // escrow-protected account marketplace</span>
           </div>
           <div className="flex items-center gap-4">
             <Link to="/terms" className="text-[#CCFF00] hover:underline transition-colors">Terms of Service</Link>
