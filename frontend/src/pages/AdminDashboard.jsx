@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight, MessageSquare, Settings, ArrowDownToLine } from "lucide-react";
+import { Check, X, RefreshCw, Eye, Ban, ChevronLeft, ChevronRight, MessageSquare, Settings, ArrowDownToLine, Zap } from "lucide-react";
 import { api, formatError } from "../lib/api";
 
 export default function AdminDashboard() {
@@ -71,6 +71,14 @@ export default function AdminDashboard() {
       await api.post(`/admin/withdrawals/${rejectModal.id}/reject`, { reason: rejectReason });
       toast.success("Withdrawal rejected — funds returned to user");
       setRejectModal(null); setRejectReason(""); load();
+    } catch (e) { toast.error(formatError(e)); }
+  };
+
+  const releaseFunds = async (orderId) => {
+    try {
+      await api.post(`/admin/orders/${orderId}/release-funds`);
+      toast.success("Funds released early — available to seller now");
+      load();
     } catch (e) { toast.error(formatError(e)); }
   };
 
@@ -254,6 +262,11 @@ export default function AdminDashboard() {
                 {["DISPUTED", "CONFIRMED"].includes(o.status) && (
                   <button onClick={() => { setSettleModal({ order: o }); setSettleNote(""); setPendingSettleAction(null); setConfirmInput(""); }} className="lootra-btn-primary !py-1 !px-2 text-xs">
                     Settle
+                  </button>
+                )}
+                {o.status === "RELEASED" && (
+                  <button onClick={() => releaseFunds(o.id)} className="lootra-btn-secondary !py-1 !px-2 text-xs inline-flex items-center gap-1 !border-[#CCFF00]/40 !text-[#CCFF00]">
+                    <Zap className="w-3 h-3" /> Release funds
                   </button>
                 )}
               </td>
