@@ -134,9 +134,9 @@ async def get_fee_config() -> dict:
         return {"buyer_fee_rate": 0.05, "seller_withdrawal_fee_rate": 0.05, "min_withdrawal_usd": 0.80, "hold_hours": 4}
     return config
 
-async def credit_seller_wallet(order: dict):
+async def credit_seller_wallet(order: dict, immediate: bool = False):
     config = await get_fee_config()
-    withdrawable_after = (now_utc() + timedelta(hours=config.get("hold_hours", 4))).isoformat()
+    withdrawable_after = now_utc().isoformat() if immediate else (now_utc() + timedelta(hours=config.get("hold_hours", 4))).isoformat()
     await db.wallet_credits.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": order["seller_id"],
@@ -1166,6 +1166,31 @@ async def complaint_order(order_id: str, body: ComplaintIn, user: dict = Depends
     await _safe_notify(notify_dispute_opened(o, user["username"]))
     return {"ok": True}
 
+@api.post("/admin/orders/{order_id}/release-funds")
+async def admin_release_funds(order_id: str, admin: dict = Depends(require_admin)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o["status"] != "RELEASED":
+        raise HTTPException(400, "Order has not been released yet")
+    listing = await db.listings.find_one({"id": o["listing_id"]})
+    if not listing or not listing.get("verified"):
+        raise HTTPException(400, "Listing was not admin-approved — early release not permitted")
+    credit = await db.wallet_credits.find_one({
+        "order_id": order_id,
+        "user_id": o["seller_id"],
+        "withdrawn": False,
+        "withdrawable_after": {"$gt": now_utc().isoformat()},
+    })
+    if not credit:
+        raise HTTPException(400, "No held funds found — already available or already withdrawn")
+    await db.wallet_credits.update_one(
+        {"id": credit["id"], "withdrawn": False},
+        {"$set": {"withdrawable_after": now_utc().isoformat()}}
+    )
+    await audit("wallet.admin_early_release", admin["id"], order_id, {"credit_id": credit["id"], "amount": credit["amount"]})
+    return {"ok": True}
+
 @api.post("/orders/{order_id}/review")
 async def review_order(order_id: str, body: ReviewIn, user: dict = Depends(get_current_user)):
     o = await db.orders.find_one({"id": order_id})
@@ -1710,7 +1735,7 @@ async def admin_settle(order_id: str, body: SettleIn, admin: dict = Depends(requ
         await db.orders.update_one({"id": order_id}, {"$set": {
             "status": "RELEASED", "timeline": timeline, "updated_at": now_utc().isoformat(),
         }})
-        await credit_seller_wallet(o)
+        await credit_seller_wallet(o, immediate=True)
         await audit("order.admin_release", admin["id"], order_id, {"amount": o["amount"]})
     else:
         timeline.append({"status": "REFUNDED", "at": now_utc().isoformat(), "note": note})
