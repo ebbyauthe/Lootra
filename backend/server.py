@@ -1485,60 +1485,6 @@ async def fiat_verify(
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return {"balance": u["balance"], "credited_usd": usd_amount}
 
-@api.post("/wallet/crypto-topup")
-async def crypto_topup(data: TopupCryptoIn, user: dict = Depends(get_current_user)):
-    if not NOWPAYMENTS_API_KEY:
-        raise HTTPException(503, "Crypto payments not configured")
-    order_id = f"wallet-{user['id'][:8]}-{uuid.uuid4().hex[:8]}"
-    payload = {
-        "price_amount": data.amount_usd,
-        "price_currency": "usd",
-        "pay_currency": data.pay_currency.lower(),
-        "order_id": order_id,
-        "order_description": "Lootra wallet top-up",
-        "ipn_callback_url": "https://lootra.onrender.com/api/webhooks/nowpayments",
-    }
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            "https://api.nowpayments.io/v1/payment",
-            json=payload,
-            headers={"x-api-key": NOWPAYMENTS_API_KEY},
-        )
-    resp = r.json()
-    if "payment_id" not in resp:
-        raise HTTPException(400, resp.get("message", "Crypto payment creation failed"))
-    await db.crypto_topups.insert_one({
-        "payment_id": str(resp["payment_id"]),
-        "order_id": order_id,
-        "user_id": user["id"],
-        "amount_usd": data.amount_usd,
-        "pay_currency": data.pay_currency,
-        "credited": False,
-        "created_at": now_utc().isoformat(),
-    })
-    return {
-        "payment_id": resp["payment_id"],
-        "pay_address": resp.get("pay_address"),
-        "pay_amount": resp.get("pay_amount"),
-        "pay_currency": resp.get("pay_currency"),
-        "order_id": order_id,
-        "expires_at": resp.get("expiration_estimate_date"),
-    }
-
-@api.get("/wallet/crypto-status/{payment_id}")
-async def crypto_payment_status(payment_id: str, user: dict = Depends(get_current_user)):
-    pt = await db.crypto_topups.find_one({"payment_id": payment_id, "user_id": user["id"]}, {"_id": 0})
-    if not pt:
-        raise HTTPException(404, "Payment not found")
-    if pt.get("credited"):
-        return {"status": "finished", "credited": True}
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(
-            f"https://api.nowpayments.io/v1/payment/{payment_id}",
-            headers={"x-api-key": NOWPAYMENTS_API_KEY},
-        )
-    data = r.json()
-    return {"status": data.get("payment_status", "waiting"), "credited": False}
 
 # ---------------- Banks / Withdrawal ----------------
 @api.get("/catalog/banks")
@@ -1685,12 +1631,6 @@ async def wallet_history(user: dict = Depends(get_current_user)):
                      "currency": t.get("currency", "USD"), "status": "completed",
                      "reference": t.get("tx_ref", ""), "created_at": t.get("created_at", ""),
                      "note": f"Top-up via card/bank ({t.get('currency','USD')} {t.get('amount','')})"})
-    # Crypto top-ups
-    async for t in db.crypto_topups.find({"user_id": uid, "credited": True}, {"_id": 0}):
-        rows.append({"type": "topup", "method": "crypto", "amount": t.get("amount_usd", 0),
-                     "currency": "USD", "status": "completed",
-                     "reference": t.get("payment_id", ""), "created_at": t.get("created_at", ""),
-                     "note": f"Top-up via crypto (${t.get('amount_usd',0):.2f})"})
     # Earnings from sales
     async for c in db.wallet_credits.find({"user_id": uid}, {"_id": 0}):
         rows.append({"type": "earning", "method": "sale", "amount": c.get("amount", 0),
@@ -1972,26 +1912,6 @@ async def flutterwave_webhook(request: Request):
                     await _safe_notify(notify_seller_withdrawal_failed(seller["email"], w, reason))
     return {"status": "ok"}
 
-@app.post("/api/webhooks/nowpayments")
-async def nowpayments_webhook(request: Request):
-    body_bytes = await request.body()
-    if NOWPAYMENTS_IPN_SECRET:
-        sig = request.headers.get("x-nowpayments-sig", "")
-        expected = _hmac.new(NOWPAYMENTS_IPN_SECRET.encode(), body_bytes, hashlib.sha512).hexdigest()
-        if not _hmac.compare_digest(sig.lower(), expected.lower()):
-            raise HTTPException(401, "Invalid webhook signature")
-    import json as _json
-    data = _json.loads(body_bytes)
-    if data.get("payment_status") in ("finished", "confirmed"):
-        # Atomically mark as credited — prevents double-credit on repeated webhook delivery
-        pt = await db.crypto_topups.find_one_and_update(
-            {"payment_id": str(data.get("payment_id", "")), "credited": False},
-            {"$set": {"credited": True, "status": "finished"}},
-        )
-        if pt:
-            await db.users.update_one({"id": pt["user_id"]}, {"$inc": {"balance": pt["amount_usd"]}})
-            await audit("wallet.crypto_topup", pt["user_id"], str(data["payment_id"]), {"amount_usd": pt["amount_usd"]})
-    return {"status": "ok"}
 
 @app.get("/")
 async def health():
